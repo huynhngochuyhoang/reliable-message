@@ -8,16 +8,45 @@ import io.github.huynhngochuyhoang.reliablemessage.observability.MessageTags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 public class RedisIdempotencyStore implements IdempotencyStore {
 
     private static final String DEFAULT_PREFIX = "reliable-message:idempotency:";
+    private static final String STARTED = "STARTED";
+    private static final RedisScript<String> TRY_START_SCRIPT = new DefaultRedisScript<>("""
+            local current = redis.call('GET', KEYS[1])
+            if not current then
+                redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+                return 'STARTED'
+            end
+            local first_separator = string.find(current, '|')
+            local state = ''
+            local expires_at = 0
+            if first_separator then
+                state = string.sub(current, 1, first_separator - 1)
+                local rest = string.sub(current, first_separator + 1)
+                local second_separator = string.find(rest, '|')
+                if second_separator then
+                    expires_at = tonumber(string.sub(rest, 1, second_separator - 1)) or 0
+                else
+                    expires_at = tonumber(rest) or 0
+                end
+            end
+            if expires_at <= tonumber(ARGV[3]) or state == 'FAILED' then
+                redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+                return 'STARTED'
+            end
+            return current
+            """, String.class);
 
     private final StringRedisTemplate redisTemplate;
     private final String keyPrefix;
@@ -58,28 +87,23 @@ public class RedisIdempotencyStore implements IdempotencyStore {
         requireKey(key);
         requirePositiveTtl(ttl);
 
-        String redisKey = redisKey(key);
-        Instant expiresAt = clock.instant().plus(ttl);
-        Boolean started = redisTemplate.opsForValue().setIfAbsent(
-                redisKey,
+        Instant now = clock.instant();
+        Instant expiresAt = now.plus(ttl);
+        String result = redisTemplate.execute(
+                TRY_START_SCRIPT,
+                List.of(redisKey(key)),
                 encode(IdempotencyState.PROCESSING, expiresAt, null),
-                ttl
+                String.valueOf(ttl.toMillis()),
+                String.valueOf(now.toEpochMilli())
         );
-        if (Boolean.TRUE.equals(started)) {
+        if (STARTED.equals(result)) {
             return IdempotencyStartResult.startAccepted();
         }
 
-        StoredState storedState = decode(redisTemplate.opsForValue().get(redisKey));
-        if (storedState == null || !storedState.expiresAt().isAfter(clock.instant())) {
-            redisTemplate.opsForValue().set(redisKey, encode(IdempotencyState.PROCESSING, expiresAt, null), ttl);
-            return IdempotencyStartResult.startAccepted();
-        }
-        if (storedState.state() == IdempotencyState.FAILED) {
-            redisTemplate.opsForValue().set(redisKey, encode(IdempotencyState.PROCESSING, expiresAt, null), ttl);
-            return IdempotencyStartResult.startAccepted();
-        }
-
-        IdempotencyStartResult duplicate = IdempotencyStartResult.duplicate(storedState.state());
+        StoredState storedState = decode(result);
+        IdempotencyStartResult duplicate = IdempotencyStartResult.duplicate(
+                storedState == null ? IdempotencyState.EXPIRED : storedState.state()
+        );
         observability.increment("message_duplicate_total",
                 new MessageTags("mvc", "idempotency", "idempotency", null, "duplicate"));
         return duplicate;

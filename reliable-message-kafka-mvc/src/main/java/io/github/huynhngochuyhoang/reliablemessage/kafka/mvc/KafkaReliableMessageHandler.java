@@ -1,6 +1,7 @@
 package io.github.huynhngochuyhoang.reliablemessage.kafka.mvc;
 
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
+import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
@@ -14,6 +15,7 @@ import org.springframework.kafka.listener.AcknowledgingMessageListener;
 import org.springframework.kafka.support.Acknowledgment;
 
 import java.time.Duration;
+import java.time.Instant;
 
 public class KafkaReliableMessageHandler implements AcknowledgingMessageListener<String, byte[]> {
 
@@ -65,6 +67,7 @@ public class KafkaReliableMessageHandler implements AcknowledgingMessageListener
         boolean idempotencyStarted = false;
         ReliableMessage<?> reliableMessage = null;
         try {
+            awaitRetryDue(record);
             reliableMessage = serializer.deserialize(record.value(), endpoint.payloadType());
             try (MessageMdc.Scope ignored = MessageMdc.apply(reliableMessage.headers())) {
                 if (isIdempotencyEnabled(reliableMessage)) {
@@ -103,6 +106,23 @@ public class KafkaReliableMessageHandler implements AcknowledgingMessageListener
             }
             consumeCounter("failed");
             routeFailure(record, acknowledgment, error);
+        }
+    }
+
+    private void awaitRetryDue(ConsumerRecord<String, byte[]> record) {
+        String retryNotBefore = KafkaRecordHeaders.value(record.headers(), ReliableMessageHeaders.RETRY_NOT_BEFORE);
+        if (retryNotBefore == null || retryNotBefore.isBlank()) {
+            return;
+        }
+        long delayMillis = Long.parseLong(retryNotBefore) - Instant.now().toEpochMilli();
+        if (delayMillis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(delayMillis);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for Kafka reliable message retry delay", error);
         }
     }
 

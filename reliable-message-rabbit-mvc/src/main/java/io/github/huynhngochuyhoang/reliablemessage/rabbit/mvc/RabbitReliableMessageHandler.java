@@ -103,8 +103,9 @@ public class RabbitReliableMessageHandler implements ChannelAwareMessageListener
                 markFailed(reliableMessage, error);
             }
             consumeCounter("failed");
-            routeFailure(message, channel, error);
-            throw error;
+            if (!routeFailure(message, channel, error)) {
+                throw error;
+            }
         }
     }
 
@@ -122,17 +123,19 @@ public class RabbitReliableMessageHandler implements ChannelAwareMessageListener
         }
     }
 
-    private void routeFailure(Message message, Channel channel, RuntimeException error) throws IOException {
+    private boolean routeFailure(Message message, Channel channel, RuntimeException error) throws IOException {
         if (retryStrategy == null) {
             channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
-            return;
+            return false;
         }
         try {
             retryStrategy.routeFailure(message, endpoint, error);
             channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+            return true;
         } catch (RuntimeException routeError) {
             error.addSuppressed(routeError);
             channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
+            return false;
         }
     }
 
