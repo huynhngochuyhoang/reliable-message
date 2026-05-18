@@ -1,6 +1,9 @@
 package io.github.huynhngochuyhoang.reliablemessage.idempotency.jdbc;
 
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyState;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -46,13 +49,28 @@ class JdbcIdempotencyStoreTest {
         assertTrue(store.tryStart("event-1", Duration.ofMinutes(5)).started());
     }
 
+    @Test
+    void autoConfiguredStoreInitializesSchema() {
+        DriverManagerDataSource dataSource = dataSource();
+        JdbcIdempotencyStore store = new JdbcIdempotencyAutoConfiguration().jdbcIdempotencyStore(
+                new JdbcTemplate(dataSource),
+                new MessageObservability(new SimpleMeterRegistry(), ObservationRegistry.NOOP)
+        );
+
+        assertTrue(store.tryStart("event-1", Duration.ofMinutes(5)).started());
+    }
+
     private static JdbcIdempotencyStore store() {
+        JdbcIdempotencyStore store = new JdbcIdempotencyStore(new JdbcTemplate(dataSource()));
+        store.initializeSchema();
+        return store;
+    }
+
+    private static DriverManagerDataSource dataSource() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(
                 "jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
         );
         dataSource.setDriverClassName("org.h2.Driver");
-        JdbcIdempotencyStore store = new JdbcIdempotencyStore(new JdbcTemplate(dataSource));
-        store.initializeSchema();
-        return store;
+        return dataSource;
     }
 }

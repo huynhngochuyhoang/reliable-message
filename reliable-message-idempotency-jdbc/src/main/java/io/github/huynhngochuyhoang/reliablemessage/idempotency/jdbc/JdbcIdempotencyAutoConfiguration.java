@@ -17,6 +17,8 @@ public class JdbcIdempotencyAutoConfiguration {
     @ConditionalOnBean(JdbcTemplate.class)
     @ConditionalOnMissingBean(IdempotencyStore.class)
     JdbcIdempotencyStore jdbcIdempotencyStore(JdbcTemplate jdbcTemplate, MessageObservability observability) {
-        return new JdbcIdempotencyStore(jdbcTemplate, java.time.Clock.systemUTC(), observability);
+        JdbcIdempotencyStore store = new JdbcIdempotencyStore(jdbcTemplate, java.time.Clock.systemUTC(), observability);
+        store.initializeSchema();
+        return store;
     }
 }
