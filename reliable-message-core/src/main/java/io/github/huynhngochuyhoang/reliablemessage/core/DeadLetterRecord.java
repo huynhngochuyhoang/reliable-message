@@ -24,7 +24,7 @@ public record DeadLetterRecord(
         consumer = requireText(consumer, "consumer");
         transport = requireText(transport, "transport");
         headers = headers == null ? Map.of() : Map.copyOf(headers);
-        deadLetteredAt = Objects.requireNonNull(deadLetteredAt, "deadLetteredAt must not be null");
+        Objects.requireNonNull(deadLetteredAt, "deadLetteredAt must not be null");
     }
 
     private static String requireText(String value, String name) {

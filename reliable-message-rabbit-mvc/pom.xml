@@ -26,6 +26,11 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>io.github.huynhngochuyhoang</groupId>
+            <artifactId>reliable-message-observability</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
         </dependency>

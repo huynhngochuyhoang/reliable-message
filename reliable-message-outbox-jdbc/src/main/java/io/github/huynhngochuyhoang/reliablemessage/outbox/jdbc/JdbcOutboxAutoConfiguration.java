@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.OutboxPublisher;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.OutboxStore;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.ReliablePublisher;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -47,8 +48,8 @@ public class JdbcOutboxAutoConfiguration {
     @Bean
     @ConditionalOnBean(OutboxStore.class)
     @ConditionalOnMissingBean(OutboxPublisher.class)
-    JdbcOutboxPublisher jdbcOutboxPublisher(OutboxStore outboxStore, Clock clock) {
-        return new JdbcOutboxPublisher(outboxStore, clock);
+    JdbcOutboxPublisher jdbcOutboxPublisher(OutboxStore outboxStore, Clock clock, MessageObservability observability) {
+        return new JdbcOutboxPublisher(outboxStore, clock, observability);
     }
 
     @Bean
@@ -58,8 +59,9 @@ public class JdbcOutboxAutoConfiguration {
             OutboxStore outboxStore,
             ReliablePublisher reliablePublisher,
             JdbcOutboxProperties properties,
-            Clock clock
+            Clock clock,
+            MessageObservability observability
     ) {
-        return new OutboxFlushScheduler(outboxStore, reliablePublisher, properties, clock);
+        return new OutboxFlushScheduler(outboxStore, reliablePublisher, properties, clock, observability);
     }
 }

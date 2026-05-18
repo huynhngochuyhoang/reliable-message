@@ -27,6 +27,9 @@ MVC + RabbitMQ + JDBC outbox + idempotency + observability
 
 After that is stable, the roadmap expands to MVC Kafka, then WebFlux Kafka with R2DBC and Reactive Redis.
 
+See [docs/mvc-rabbit-milestone-01-06.md](docs/mvc-rabbit-milestone-01-06.md) for the completed Milestone 01-06 MVC Rabbit documentation.
+See [docs/mvc-kafka-milestone-07.md](docs/mvc-kafka-milestone-07.md) for the completed Milestone 07 MVC Kafka documentation.
+
 ## Project Environment
 
 - JDK: 21
@@ -35,13 +38,19 @@ After that is stable, the roadmap expands to MVC Kafka, then WebFlux Kafka with 
 
 ## Current Milestone
 
-Milestone 02 builds the first blocking MVC RabbitMQ path.
+Milestone 07 adds blocking MVC Kafka support alongside the existing MVC Rabbit path.
 
 Current modules:
 
 - `reliable-message-core`
 - `reliable-message-mvc-api`
+- `reliable-message-idempotency-jdbc`
+- `reliable-message-idempotency-redis`
+- `reliable-message-outbox-jdbc`
 - `reliable-message-rabbit-mvc`
+- `reliable-message-kafka-mvc`
+- `reliable-message-observability`
+- `reliable-message-admin-api`
 - `reliable-message-mvc-starter`
 
 `reliable-message-core` is the runtime-neutral API shared by all future stacks.
@@ -59,7 +68,10 @@ It contains:
 
 The core module must not depend on Spring MVC, WebFlux, JDBC, R2DBC, RabbitMQ, Kafka, or Redis.
 
-`reliable-message-mvc-starter` provides the blocking MVC programming model and pulls in the RabbitMQ MVP adapter.
+`reliable-message-mvc-starter` provides the blocking MVC programming model and pulls in the RabbitMQ and Kafka MVC adapters.
+It also brings the JDBC outbox, JDBC idempotency provider, observability module, and disabled-by-default admin API for the MVC stack.
+
+For idempotency, applications should normally use one provider module. The MVC starter already includes `reliable-message-idempotency-jdbc`; `reliable-message-idempotency-redis` is an alternative provider for applications that intentionally store idempotency state in Redis.
 
 ## MVC RabbitMQ MVP
 

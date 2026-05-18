@@ -3,6 +3,8 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.mvc;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 @ConfigurationProperties(prefix = "message.reliability")
@@ -12,6 +14,7 @@ public class RabbitReliableMessageProperties {
     private String transport = "rabbit";
     private String serviceName = "application";
     private final Rabbit rabbit = new Rabbit();
+    private final Retry retry = new Retry();
     private final Idempotency idempotency = new Idempotency();
 
     public String getRuntime() {
@@ -40,6 +43,10 @@ public class RabbitReliableMessageProperties {
 
     public Rabbit getRabbit() {
         return rabbit;
+    }
+
+    public Retry getRetry() {
+        return retry;
     }
 
     public Idempotency getIdempotency() {
@@ -99,6 +106,32 @@ public class RabbitReliableMessageProperties {
 
         public void setListenerAutoStartup(boolean listenerAutoStartup) {
             this.listenerAutoStartup = listenerAutoStartup;
+        }
+    }
+
+    public static class Retry {
+        private int attempts = 5;
+        private List<Duration> backoff = new ArrayList<>(List.of(
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(30),
+                Duration.ofMinutes(1),
+                Duration.ofMinutes(5)
+        ));
+
+        public int getAttempts() {
+            return attempts;
+        }
+
+        public void setAttempts(int attempts) {
+            this.attempts = attempts;
+        }
+
+        public List<Duration> getBackoff() {
+            return List.copyOf(backoff);
+        }
+
+        public void setBackoff(List<Duration> backoff) {
+            this.backoff = backoff == null ? new ArrayList<>() : new ArrayList<>(backoff);
         }
     }
 

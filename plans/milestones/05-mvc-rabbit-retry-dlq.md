@@ -45,4 +45,4 @@ Make RabbitMQ consumer failures visible and recoverable through retry queues and
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Done
+- [x] Done

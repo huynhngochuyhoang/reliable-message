@@ -1,6 +1,7 @@
 package io.github.huynhngochuyhoang.reliablemessage.idempotency.jdbc;
 
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -15,7 +16,7 @@ public class JdbcIdempotencyAutoConfiguration {
     @Bean
     @ConditionalOnBean(JdbcTemplate.class)
     @ConditionalOnMissingBean(IdempotencyStore.class)
-    JdbcIdempotencyStore jdbcIdempotencyStore(JdbcTemplate jdbcTemplate) {
-        return new JdbcIdempotencyStore(jdbcTemplate);
+    JdbcIdempotencyStore jdbcIdempotencyStore(JdbcTemplate jdbcTemplate, MessageObservability observability) {
+        return new JdbcIdempotencyStore(jdbcTemplate, java.time.Clock.systemUTC(), observability);
     }
 }

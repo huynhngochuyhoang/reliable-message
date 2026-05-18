@@ -44,4 +44,4 @@ Expose operational signals and internal controls for message reliability workflo
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Done
+- [x] Done

@@ -14,9 +14,14 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 class RabbitReliableListenerRegistrarTest {
@@ -42,8 +47,21 @@ class RabbitReliableListenerRegistrarTest {
 
             RabbitAdmin rabbitAdmin = context.getBean(RabbitAdmin.class);
             verify(rabbitAdmin).declareExchange(any(DirectExchange.class));
-            verify(rabbitAdmin).declareQueue(any(Queue.class));
-            verify(rabbitAdmin).declareBinding(any(Binding.class));
+            verify(rabbitAdmin, times(6)).declareBinding(any(Binding.class));
+
+            org.mockito.ArgumentCaptor<Queue> queueCaptor = forClass(Queue.class);
+            verify(rabbitAdmin, times(6)).declareQueue(queueCaptor.capture());
+            Set<String> queueNames = queueCaptor.getAllValues().stream()
+                    .map(Queue::getName)
+                    .collect(Collectors.toSet());
+            assertEquals(Set.of(
+                    "order-service.order.created",
+                    "order-service.order.created.dlq",
+                    "order-service.order.created.retry.5s",
+                    "order-service.order.created.retry.30s",
+                    "order-service.order.created.retry.1m",
+                    "order-service.order.created.retry.5m"
+            ), queueNames);
         });
     }
 

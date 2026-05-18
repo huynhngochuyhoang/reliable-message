@@ -11,7 +11,7 @@ public record MessageError(
 
     public MessageError {
         errorType = errorType == null || errorType.isBlank() ? "unknown" : errorType;
-        occurredAt = Objects.requireNonNull(occurredAt, "occurredAt must not be null");
+        Objects.requireNonNull(occurredAt, "occurredAt must not be null");
     }
 
     public static MessageError from(Throwable error, Instant occurredAt) {

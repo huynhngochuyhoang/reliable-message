@@ -18,8 +18,11 @@
         <module>reliable-message-idempotency-jdbc</module>
         <module>reliable-message-idempotency-redis</module>
         <module>reliable-message-outbox-jdbc</module>
-        <module>reliable-message-mvc-starter</module>
         <module>reliable-message-rabbit-mvc</module>
+        <module>reliable-message-kafka-mvc</module>
+        <module>reliable-message-observability</module>
+        <module>reliable-message-admin-api</module>
+        <module>reliable-message-mvc-starter</module>
     </modules>
 
     <properties>

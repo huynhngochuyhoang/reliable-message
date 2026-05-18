@@ -4,7 +4,9 @@ import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.ReliableListener;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
@@ -28,8 +30,9 @@ public class RabbitReliableListenerRegistrar implements SmartInitializingSinglet
     private final ConnectionFactory connectionFactory;
     private final MessageSerializer serializer;
     private final RabbitReliableMessageProperties properties;
-    private final MeterRegistry meterRegistry;
+    private final MessageObservability observability;
     private final RabbitTopologyAutoConfigurer topologyAutoConfigurer;
+    private final RabbitRetryStrategy retryStrategy;
     private final IdempotencyStore idempotencyStore;
     private final List<SimpleMessageListenerContainer> containers = new ArrayList<>();
     private ApplicationContext applicationContext;
@@ -39,24 +42,27 @@ public class RabbitReliableListenerRegistrar implements SmartInitializingSinglet
             MessageSerializer serializer,
             RabbitReliableMessageProperties properties,
             MeterRegistry meterRegistry,
-            RabbitTopologyAutoConfigurer topologyAutoConfigurer
+            RabbitTopologyAutoConfigurer topologyAutoConfigurer,
+            RabbitRetryStrategy retryStrategy
     ) {
-        this(connectionFactory, serializer, properties, meterRegistry, topologyAutoConfigurer, null);
+        this(connectionFactory, serializer, properties, new MessageObservability(meterRegistry, ObservationRegistry.NOOP), topologyAutoConfigurer, retryStrategy, null);
     }
 
     public RabbitReliableListenerRegistrar(
             ConnectionFactory connectionFactory,
             MessageSerializer serializer,
             RabbitReliableMessageProperties properties,
-            MeterRegistry meterRegistry,
+            MessageObservability observability,
             RabbitTopologyAutoConfigurer topologyAutoConfigurer,
+            RabbitRetryStrategy retryStrategy,
             IdempotencyStore idempotencyStore
     ) {
         this.connectionFactory = connectionFactory;
         this.serializer = serializer;
         this.properties = properties;
-        this.meterRegistry = meterRegistry;
+        this.observability = observability;
         this.topologyAutoConfigurer = topologyAutoConfigurer;
+        this.retryStrategy = retryStrategy;
         this.idempotencyStore = idempotencyStore;
     }
 
@@ -126,9 +132,10 @@ public class RabbitReliableListenerRegistrar implements SmartInitializingSinglet
         container.setMessageListener(new RabbitReliableMessageHandler(
                 endpoint,
                 serializer,
-                meterRegistry,
+                observability,
                 idempotencyStore,
-                properties.getIdempotency().getTtl()
+                properties.getIdempotency().getTtl(),
+                retryStrategy
         ));
         container.setAutoStartup(properties.getRabbit().isListenerAutoStartup());
         return container;

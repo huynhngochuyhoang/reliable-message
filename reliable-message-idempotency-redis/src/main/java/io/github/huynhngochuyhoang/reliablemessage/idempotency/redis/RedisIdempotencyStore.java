@@ -3,6 +3,10 @@ package io.github.huynhngochuyhoang.reliablemessage.idempotency.redis;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageTags;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Clock;
@@ -18,19 +22,39 @@ public class RedisIdempotencyStore implements IdempotencyStore {
     private final StringRedisTemplate redisTemplate;
     private final String keyPrefix;
     private final Clock clock;
+    private final MessageObservability observability;
 
     public RedisIdempotencyStore(StringRedisTemplate redisTemplate) {
         this(redisTemplate, DEFAULT_PREFIX, Clock.systemUTC());
     }
 
     public RedisIdempotencyStore(StringRedisTemplate redisTemplate, String keyPrefix, Clock clock) {
+        this(redisTemplate, keyPrefix, clock, new MessageObservability(new SimpleMeterRegistry(), ObservationRegistry.NOOP));
+    }
+
+    public RedisIdempotencyStore(
+            StringRedisTemplate redisTemplate,
+            String keyPrefix,
+            Clock clock,
+            MessageObservability observability
+    ) {
         this.redisTemplate = Objects.requireNonNull(redisTemplate, "redisTemplate must not be null");
         this.keyPrefix = Objects.requireNonNull(keyPrefix, "keyPrefix must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.observability = Objects.requireNonNull(observability, "observability must not be null");
     }
 
     @Override
     public IdempotencyStartResult tryStart(String key, Duration ttl) {
+        return observability.observe(
+                "message.idempotency.check",
+                "message_idempotency_check_duration",
+                new MessageTags("mvc", "idempotency", "idempotency", null, "check"),
+                () -> tryStartInternal(key, ttl)
+        );
+    }
+
+    private IdempotencyStartResult tryStartInternal(String key, Duration ttl) {
         requireKey(key);
         requirePositiveTtl(ttl);
 
@@ -55,7 +79,10 @@ public class RedisIdempotencyStore implements IdempotencyStore {
             return IdempotencyStartResult.startAccepted();
         }
 
-        return IdempotencyStartResult.duplicate(storedState.state());
+        IdempotencyStartResult duplicate = IdempotencyStartResult.duplicate(storedState.state());
+        observability.increment("message_duplicate_total",
+                new MessageTags("mvc", "idempotency", "idempotency", null, "duplicate"));
+        return duplicate;
     }
 
     @Override

@@ -27,7 +27,27 @@
         </dependency>
         <dependency>
             <groupId>io.github.huynhngochuyhoang</groupId>
+            <artifactId>reliable-message-kafka-mvc</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.huynhngochuyhoang</groupId>
+            <artifactId>reliable-message-observability</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.huynhngochuyhoang</groupId>
             <artifactId>reliable-message-outbox-jdbc</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.huynhngochuyhoang</groupId>
+            <artifactId>reliable-message-idempotency-jdbc</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.huynhngochuyhoang</groupId>
+            <artifactId>reliable-message-admin-api</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

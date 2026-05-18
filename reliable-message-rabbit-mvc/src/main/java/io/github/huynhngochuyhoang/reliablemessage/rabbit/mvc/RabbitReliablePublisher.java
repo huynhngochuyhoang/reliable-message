@@ -5,8 +5,11 @@ import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.ReliablePublisher;
-import io.micrometer.core.instrument.Counter;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageMdc;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageTags;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
@@ -23,7 +26,7 @@ public class RabbitReliablePublisher implements ReliablePublisher {
     private final MessageSerializer serializer;
     private final RabbitReliableMessageProperties properties;
     private final Clock clock;
-    private final MeterRegistry meterRegistry;
+    private final MessageObservability observability;
 
     public RabbitReliablePublisher(
             RabbitTemplate rabbitTemplate,
@@ -32,11 +35,21 @@ public class RabbitReliablePublisher implements ReliablePublisher {
             Clock clock,
             MeterRegistry meterRegistry
     ) {
+        this(rabbitTemplate, serializer, properties, clock, new MessageObservability(meterRegistry, ObservationRegistry.NOOP));
+    }
+
+    public RabbitReliablePublisher(
+            RabbitTemplate rabbitTemplate,
+            MessageSerializer serializer,
+            RabbitReliableMessageProperties properties,
+            Clock clock,
+            MessageObservability observability
+    ) {
         this.rabbitTemplate = rabbitTemplate;
         this.serializer = serializer;
         this.properties = properties;
         this.clock = clock;
-        this.meterRegistry = meterRegistry;
+        this.observability = observability;
     }
 
     @Override
@@ -51,10 +64,16 @@ public class RabbitReliablePublisher implements ReliablePublisher {
         reliableMessage.headers().forEach(messageProperties::setHeader);
 
         try {
-            send(eventName, new Message(body, messageProperties));
-            publishCounter(eventName, "success").increment();
+            observability.observe(
+                    "message.publish",
+                    null,
+                    MessageTags.mvcRabbit(eventName, null, "success"),
+                    () -> send(eventName, new Message(body, messageProperties))
+            );
+            observability.increment("message_publish_total", MessageTags.mvcRabbit(eventName, null, "success"));
         } catch (RuntimeException error) {
-            publishCounter(eventName, "failed").increment();
+            observability.increment("message_publish_total", MessageTags.mvcRabbit(eventName, null, "failed"));
+            observability.increment("message_publish_failed_total", MessageTags.mvcRabbit(eventName, null, "failed"));
             throw error;
         }
     }
@@ -67,6 +86,7 @@ public class RabbitReliablePublisher implements ReliablePublisher {
         putIfPresent(headers, ReliableMessageHeaders.AGGREGATE_ID, options.aggregateId());
         putIfPresent(headers, ReliableMessageHeaders.IDEMPOTENCY_KEY, options.idempotencyKey());
         putIfPresent(headers, ReliableMessageHeaders.CORRELATION_ID, options.correlationId());
+        putIfPresent(headers, ReliableMessageHeaders.TRACE_ID, traceId(headers));
         putIfPresent(headers, ReliableMessageHeaders.PARTITION_KEY, options.partitionKey());
 
         return new ReliableMessage<>(
@@ -75,7 +95,7 @@ public class RabbitReliablePublisher implements ReliablePublisher {
                 options.aggregateId(),
                 options.idempotencyKey(),
                 options.correlationId(),
-                null,
+                headers.get(ReliableMessageHeaders.TRACE_ID),
                 clock.instant(),
                 headers,
                 payload
@@ -103,12 +123,8 @@ public class RabbitReliablePublisher implements ReliablePublisher {
         }
     }
 
-    private Counter publishCounter(String eventName, String status) {
-        return Counter.builder("message_publish_total")
-                .tag("runtime", "mvc")
-                .tag("transport", "rabbit")
-                .tag("event_name", eventName)
-                .tag("status", status)
-                .register(meterRegistry);
+    private static String traceId(Map<String, String> headers) {
+        String traceId = headers.get(ReliableMessageHeaders.TRACE_ID);
+        return traceId == null || traceId.isBlank() ? MessageMdc.currentTraceId() : traceId;
     }
 }

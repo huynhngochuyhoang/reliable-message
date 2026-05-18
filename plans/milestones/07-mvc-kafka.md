@@ -46,4 +46,4 @@ Add blocking MVC Kafka support with reliable publish and consume semantics.
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Done
+- [x] Done

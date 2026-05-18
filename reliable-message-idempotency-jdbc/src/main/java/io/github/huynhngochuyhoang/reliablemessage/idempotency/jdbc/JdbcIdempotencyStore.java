@@ -3,6 +3,10 @@ package io.github.huynhngochuyhoang.reliablemessage.idempotency.jdbc;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageTags;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -17,14 +21,20 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
 
     private final JdbcTemplate jdbcTemplate;
     private final Clock clock;
+    private final MessageObservability observability;
 
     public JdbcIdempotencyStore(JdbcTemplate jdbcTemplate) {
         this(jdbcTemplate, Clock.systemUTC());
     }
 
     public JdbcIdempotencyStore(JdbcTemplate jdbcTemplate, Clock clock) {
+        this(jdbcTemplate, clock, new MessageObservability(new SimpleMeterRegistry(), ObservationRegistry.NOOP));
+    }
+
+    public JdbcIdempotencyStore(JdbcTemplate jdbcTemplate, Clock clock, MessageObservability observability) {
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.observability = Objects.requireNonNull(observability, "observability must not be null");
     }
 
     public void initializeSchema() {
@@ -42,27 +52,12 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
 
     @Override
     public IdempotencyStartResult tryStart(String key, Duration ttl) {
-        requireKey(key);
-        requirePositiveTtl(ttl);
-
-        Instant now = clock.instant();
-        Instant expiresAt = now.plus(ttl);
-        try {
-            jdbcTemplate.update("""
-                            insert into message_idempotency
-                            (idempotency_key, status, expires_at, created_at, updated_at, last_error)
-                            values (?, ?, ?, ?, ?, null)
-                            """,
-                    key,
-                    IdempotencyState.PROCESSING.name(),
-                    Timestamp.from(expiresAt),
-                    Timestamp.from(now),
-                    Timestamp.from(now)
-            );
-            return IdempotencyStartResult.startAccepted();
-        } catch (DuplicateKeyException ignored) {
-            return tryRestartExisting(key, now, expiresAt);
-        }
+        return observability.observe(
+                "message.idempotency.check",
+                "message_idempotency_check_duration",
+                new MessageTags("mvc", "idempotency", "idempotency", null, "check"),
+                () -> tryStartInternal(key, ttl)
+        );
     }
 
     @Override
@@ -97,6 +92,35 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
 
         IdempotencyState state = findState(key, now);
         return IdempotencyStartResult.duplicate(state);
+    }
+
+    private IdempotencyStartResult tryStartInternal(String key, Duration ttl) {
+        requireKey(key);
+        requirePositiveTtl(ttl);
+
+        Instant now = clock.instant();
+        Instant expiresAt = now.plus(ttl);
+        try {
+            jdbcTemplate.update("""
+                            insert into message_idempotency
+                            (idempotency_key, status, expires_at, created_at, updated_at, last_error)
+                            values (?, ?, ?, ?, ?, null)
+                            """,
+                    key,
+                    IdempotencyState.PROCESSING.name(),
+                    Timestamp.from(expiresAt),
+                    Timestamp.from(now),
+                    Timestamp.from(now)
+            );
+            return IdempotencyStartResult.startAccepted();
+        } catch (DuplicateKeyException ignored) {
+            IdempotencyStartResult result = tryRestartExisting(key, now, expiresAt);
+            if (!result.started()) {
+                observability.increment("message_duplicate_total",
+                        new MessageTags("mvc", "idempotency", "idempotency", null, "duplicate"));
+            }
+            return result;
+        }
     }
 
     private IdempotencyState findState(String key, Instant now) {
