@@ -15,4 +15,4 @@ Tracking docs for the roadmap in `reliable-message-design.md`.
 9. [WebFlux Storage](milestones/09-webflux-storage.md)
 10. [WebFlux Kafka](milestones/10-webflux-kafka.md)
 11. [WebFlux Rabbit Research](milestones/11-webflux-rabbit-research.md)
-
+12. [RPC Extension](milestones/12-rpc-extension.md)

@@ -44,4 +44,4 @@ Persist messages in the same database transaction as business data before publis
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Done
+- [x] Done

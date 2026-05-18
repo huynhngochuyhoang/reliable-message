@@ -2,6 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.mvc.autoconfigure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
+import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.ReliablePublisher;
 import io.github.huynhngochuyhoang.reliablemessage.rabbit.mvc.*;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -72,14 +73,16 @@ public class RabbitReliableMessageAutoConfiguration {
             MessageSerializer serializer,
             RabbitReliableMessageProperties properties,
             MeterRegistry meterRegistry,
-            RabbitTopologyAutoConfigurer topologyAutoConfigurer
+            RabbitTopologyAutoConfigurer topologyAutoConfigurer,
+            ObjectProvider<IdempotencyStore> idempotencyStore
     ) {
         return new RabbitReliableListenerRegistrar(
                 connectionFactory,
                 serializer,
                 properties,
                 meterRegistry,
-                topologyAutoConfigurer
+                topologyAutoConfigurer,
+                idempotencyStore.getIfAvailable()
         );
     }
 }

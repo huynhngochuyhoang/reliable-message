@@ -2,6 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.mvc;
 
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
+import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.ReliableListener;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.amqp.core.AcknowledgeMode;
@@ -29,6 +30,7 @@ public class RabbitReliableListenerRegistrar implements SmartInitializingSinglet
     private final RabbitReliableMessageProperties properties;
     private final MeterRegistry meterRegistry;
     private final RabbitTopologyAutoConfigurer topologyAutoConfigurer;
+    private final IdempotencyStore idempotencyStore;
     private final List<SimpleMessageListenerContainer> containers = new ArrayList<>();
     private ApplicationContext applicationContext;
 
@@ -39,11 +41,23 @@ public class RabbitReliableListenerRegistrar implements SmartInitializingSinglet
             MeterRegistry meterRegistry,
             RabbitTopologyAutoConfigurer topologyAutoConfigurer
     ) {
+        this(connectionFactory, serializer, properties, meterRegistry, topologyAutoConfigurer, null);
+    }
+
+    public RabbitReliableListenerRegistrar(
+            ConnectionFactory connectionFactory,
+            MessageSerializer serializer,
+            RabbitReliableMessageProperties properties,
+            MeterRegistry meterRegistry,
+            RabbitTopologyAutoConfigurer topologyAutoConfigurer,
+            IdempotencyStore idempotencyStore
+    ) {
         this.connectionFactory = connectionFactory;
         this.serializer = serializer;
         this.properties = properties;
         this.meterRegistry = meterRegistry;
         this.topologyAutoConfigurer = topologyAutoConfigurer;
+        this.idempotencyStore = idempotencyStore;
     }
 
     @Override
@@ -109,7 +123,13 @@ public class RabbitReliableListenerRegistrar implements SmartInitializingSinglet
         SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
         container.setQueueNames(endpoint.queueName());
         container.setAcknowledgeMode(AcknowledgeMode.MANUAL);
-        container.setMessageListener(new RabbitReliableMessageHandler(endpoint, serializer, meterRegistry));
+        container.setMessageListener(new RabbitReliableMessageHandler(
+                endpoint,
+                serializer,
+                meterRegistry,
+                idempotencyStore,
+                properties.getIdempotency().getTtl()
+        ));
         container.setAutoStartup(properties.getRabbit().isListenerAutoStartup());
         return container;
     }

@@ -15,6 +15,9 @@
     <modules>
         <module>reliable-message-core</module>
         <module>reliable-message-mvc-api</module>
+        <module>reliable-message-idempotency-jdbc</module>
+        <module>reliable-message-idempotency-redis</module>
+        <module>reliable-message-outbox-jdbc</module>
         <module>reliable-message-mvc-starter</module>
         <module>reliable-message-rabbit-mvc</module>
     </modules>

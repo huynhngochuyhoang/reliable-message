@@ -2,6 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.mvc;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
 import java.util.Objects;
 
 @ConfigurationProperties(prefix = "message.reliability")
@@ -11,6 +12,7 @@ public class RabbitReliableMessageProperties {
     private String transport = "rabbit";
     private String serviceName = "application";
     private final Rabbit rabbit = new Rabbit();
+    private final Idempotency idempotency = new Idempotency();
 
     public String getRuntime() {
         return runtime;
@@ -40,6 +42,10 @@ public class RabbitReliableMessageProperties {
         return rabbit;
     }
 
+    public Idempotency getIdempotency() {
+        return idempotency;
+    }
+
     public String queueName(String eventName) {
         return safeServiceName() + "." + Objects.requireNonNull(eventName, "eventName must not be null");
     }
@@ -52,6 +58,7 @@ public class RabbitReliableMessageProperties {
         private String exchange = "app.events";
         private boolean autoDeclare = true;
         private boolean publisherConfirm = true;
+        private Duration publisherConfirmTimeout = Duration.ofSeconds(5);
         private boolean listenerAutoStartup = true;
 
         public String getExchange() {
@@ -78,12 +85,32 @@ public class RabbitReliableMessageProperties {
             this.publisherConfirm = publisherConfirm;
         }
 
+        public Duration getPublisherConfirmTimeout() {
+            return publisherConfirmTimeout;
+        }
+
+        public void setPublisherConfirmTimeout(Duration publisherConfirmTimeout) {
+            this.publisherConfirmTimeout = publisherConfirmTimeout;
+        }
+
         public boolean isListenerAutoStartup() {
             return listenerAutoStartup;
         }
 
         public void setListenerAutoStartup(boolean listenerAutoStartup) {
             this.listenerAutoStartup = listenerAutoStartup;
+        }
+    }
+
+    public static class Idempotency {
+        private Duration ttl = Duration.ofHours(24);
+
+        public Duration getTtl() {
+            return ttl;
+        }
+
+        public void setTtl(Duration ttl) {
+            this.ttl = ttl;
         }
     }
 }

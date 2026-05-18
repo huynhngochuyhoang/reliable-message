@@ -8,6 +8,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.core.RabbitOperations;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.time.Clock;
@@ -16,7 +17,9 @@ import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 class RabbitReliablePublisherTest {
@@ -24,6 +27,10 @@ class RabbitReliablePublisherTest {
     @Test
     void publishesEnvelopeWithRabbitHeaders() {
         RabbitTemplate rabbitTemplate = org.mockito.Mockito.mock(RabbitTemplate.class);
+        when(rabbitTemplate.invoke(any(RabbitOperations.OperationsCallback.class))).thenAnswer(invocation -> {
+            RabbitOperations.OperationsCallback<?> callback = invocation.getArgument(0);
+            return callback.doInRabbit(rabbitTemplate);
+        });
         RabbitReliableMessageProperties properties = new RabbitReliableMessageProperties();
         properties.getRabbit().setExchange("app.events");
         JacksonReliableMessageSerializer serializer = new JacksonReliableMessageSerializer(new ObjectMapper());
@@ -48,6 +55,7 @@ class RabbitReliablePublisherTest {
 
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
         verify(rabbitTemplate).send(eq("app.events"), eq("order.created"), messageCaptor.capture());
+        verify(rabbitTemplate).waitForConfirmsOrDie(5000L);
 
         Message message = messageCaptor.getValue();
         ReliableMessage<OrderCreated> envelope = serializer.deserialize(message.getBody(), OrderCreated.class);

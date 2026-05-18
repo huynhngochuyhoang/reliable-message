@@ -51,7 +51,7 @@ public class RabbitReliablePublisher implements ReliablePublisher {
         reliableMessage.headers().forEach(messageProperties::setHeader);
 
         try {
-            rabbitTemplate.send(properties.getRabbit().getExchange(), eventName, new Message(body, messageProperties));
+            send(eventName, new Message(body, messageProperties));
             publishCounter(eventName, "success").increment();
         } catch (RuntimeException error) {
             publishCounter(eventName, "failed").increment();
@@ -80,6 +80,21 @@ public class RabbitReliablePublisher implements ReliablePublisher {
                 headers,
                 payload
         );
+    }
+
+    private void send(String eventName, Message message) {
+        String exchange = properties.getRabbit().getExchange();
+        if (!properties.getRabbit().isPublisherConfirm()) {
+            rabbitTemplate.send(exchange, eventName, message);
+            return;
+        }
+
+        long timeoutMillis = properties.getRabbit().getPublisherConfirmTimeout().toMillis();
+        rabbitTemplate.invoke(operations -> {
+            operations.send(exchange, eventName, message);
+            operations.waitForConfirmsOrDie(timeoutMillis);
+            return null;
+        });
     }
 
     private static void putIfPresent(Map<String, String> headers, String name, String value) {
