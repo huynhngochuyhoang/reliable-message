@@ -12,6 +12,7 @@ public final class ReliableMessageHeaders {
     public static final String PARTITION_KEY = "x-partition-key";
     public static final String RETRY_COUNT = "x-retry-count";
     public static final String ORIGINAL_MESSAGE_ID = "x-original-message-id";
+    public static final String RETRY_NOT_BEFORE = "x-retry-not-before";
 
     private ReliableMessageHeaders() {
     }

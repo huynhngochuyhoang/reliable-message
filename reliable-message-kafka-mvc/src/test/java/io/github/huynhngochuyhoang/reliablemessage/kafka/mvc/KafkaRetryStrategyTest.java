@@ -1,6 +1,7 @@
 package io.github.huynhngochuyhoang.reliablemessage.kafka.mvc;
 
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -10,6 +11,9 @@ import org.springframework.kafka.core.KafkaTemplate;
 
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,11 +26,7 @@ class KafkaRetryStrategyTest {
     @Test
     void routesToRetryTopicBeforeAttemptsAreExhausted() throws Exception {
         KafkaTemplate<String, byte[]> kafkaTemplate = kafkaTemplate();
-        KafkaRetryStrategy retryStrategy = new KafkaRetryStrategy(
-                kafkaTemplate,
-                new KafkaReliableMessageProperties(),
-                new SimpleMeterRegistry()
-        );
+        KafkaRetryStrategy retryStrategy = retryStrategy(kafkaTemplate);
 
         retryStrategy.routeFailure(record(0), endpoint(), new IllegalStateException("boom"));
 
@@ -37,17 +37,17 @@ class KafkaRetryStrategyTest {
         assertEquals("app.order.created.order-service.retry.5s", routed.topic());
         assertEquals("order-1", routed.key());
         assertEquals("1", header(routed, ReliableMessageHeaders.RETRY_COUNT));
+        assertEquals(
+                "2026-05-18T00:00:05Z",
+                Instant.ofEpochMilli(Long.parseLong(header(routed, ReliableMessageHeaders.RETRY_NOT_BEFORE))).toString()
+        );
         assertEquals("boom", header(routed, "x-error-message"));
     }
 
     @Test
     void routesToDltWhenAttemptsAreExhausted() throws Exception {
         KafkaTemplate<String, byte[]> kafkaTemplate = kafkaTemplate();
-        KafkaRetryStrategy retryStrategy = new KafkaRetryStrategy(
-                kafkaTemplate,
-                new KafkaReliableMessageProperties(),
-                new SimpleMeterRegistry()
-        );
+        KafkaRetryStrategy retryStrategy = retryStrategy(kafkaTemplate);
 
         retryStrategy.routeFailure(record(4), endpoint(), new IllegalStateException("boom"));
 
@@ -56,6 +56,16 @@ class KafkaRetryStrategyTest {
 
         assertEquals("app.order.created.order-service.dlt", recordCaptor.getValue().topic());
         assertEquals("5", header(recordCaptor.getValue(), ReliableMessageHeaders.RETRY_COUNT));
+        assertEquals(null, header(recordCaptor.getValue(), ReliableMessageHeaders.RETRY_NOT_BEFORE));
+    }
+
+    private static KafkaRetryStrategy retryStrategy(KafkaTemplate<String, byte[]> kafkaTemplate) {
+        return new KafkaRetryStrategy(
+                kafkaTemplate,
+                new KafkaReliableMessageProperties(),
+                new MessageObservability(new SimpleMeterRegistry(), io.micrometer.observation.ObservationRegistry.NOOP),
+                Clock.fixed(Instant.parse("2026-05-18T00:00:00Z"), ZoneOffset.UTC)
+        );
     }
 
     private static KafkaReliableListenerEndpoint endpoint() throws NoSuchMethodException {
@@ -103,7 +113,8 @@ class KafkaRetryStrategyTest {
     }
 
     private static String header(ProducerRecord<String, byte[]> record, String name) {
-        return new String(record.headers().lastHeader(name).value(), StandardCharsets.UTF_8);
+        org.apache.kafka.common.header.Header header = record.headers().lastHeader(name);
+        return header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }
 
     static final class Listener {

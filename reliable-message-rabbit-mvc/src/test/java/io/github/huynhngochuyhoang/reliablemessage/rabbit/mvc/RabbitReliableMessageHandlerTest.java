@@ -7,16 +7,19 @@ import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.ReliableListener;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -98,6 +101,24 @@ class RabbitReliableMessageHandlerTest {
         verify(channel).basicNack(42L, false, true);
     }
 
+    @Test
+    void returnsNormallyAfterSuccessfulRetryRouting() throws Exception {
+        FailingListener listener = new FailingListener();
+        RabbitTemplate rabbitTemplate = org.mockito.Mockito.mock(RabbitTemplate.class);
+        RabbitRetryStrategy retryStrategy = new RabbitRetryStrategy(
+                rabbitTemplate,
+                new RabbitReliableMessageProperties(),
+                new SimpleMeterRegistry()
+        );
+        RabbitReliableMessageHandler handler = handler(listener, "handle", null, retryStrategy);
+        Channel channel = org.mockito.Mockito.mock(Channel.class);
+
+        assertDoesNotThrow(() -> handler.onMessage(message(), channel));
+
+        verify(channel).basicAck(42L, false);
+        verify(channel, never()).basicNack(42L, false, true);
+    }
+
     private static RabbitReliableMessageHandler handler(Object listener, String methodName) throws NoSuchMethodException {
         return handler(listener, methodName, null);
     }
@@ -106,6 +127,15 @@ class RabbitReliableMessageHandlerTest {
             Object listener,
             String methodName,
             IdempotencyStore idempotencyStore
+    ) throws NoSuchMethodException {
+        return handler(listener, methodName, idempotencyStore, null);
+    }
+
+    private static RabbitReliableMessageHandler handler(
+            Object listener,
+            String methodName,
+            IdempotencyStore idempotencyStore,
+            RabbitRetryStrategy retryStrategy
     ) throws NoSuchMethodException {
         Method method = listener.getClass().getDeclaredMethod(methodName, ReliableMessage.class);
         RabbitReliableListenerEndpoint endpoint = new RabbitReliableListenerEndpoint(
@@ -119,9 +149,10 @@ class RabbitReliableMessageHandlerTest {
         return new RabbitReliableMessageHandler(
                 endpoint,
                 new JacksonReliableMessageSerializer(new ObjectMapper()),
-                new SimpleMeterRegistry(),
+                new MessageObservability(new SimpleMeterRegistry(), io.micrometer.observation.ObservationRegistry.NOOP),
                 idempotencyStore,
-                Duration.ofHours(24)
+                Duration.ofHours(24),
+                retryStrategy
         );
     }
 

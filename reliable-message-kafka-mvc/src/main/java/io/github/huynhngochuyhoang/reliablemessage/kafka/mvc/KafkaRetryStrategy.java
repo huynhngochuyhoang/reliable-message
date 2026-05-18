@@ -10,6 +10,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.springframework.kafka.core.KafkaTemplate;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -21,6 +22,7 @@ public class KafkaRetryStrategy {
     private final KafkaTemplate<String, byte[]> kafkaTemplate;
     private final KafkaReliableMessageProperties properties;
     private final MessageObservability observability;
+    private final Clock clock;
 
     public KafkaRetryStrategy(
             KafkaTemplate<String, byte[]> kafkaTemplate,
@@ -35,9 +37,19 @@ public class KafkaRetryStrategy {
             KafkaReliableMessageProperties properties,
             MessageObservability observability
     ) {
+        this(kafkaTemplate, properties, observability, Clock.systemUTC());
+    }
+
+    KafkaRetryStrategy(
+            KafkaTemplate<String, byte[]> kafkaTemplate,
+            KafkaReliableMessageProperties properties,
+            MessageObservability observability,
+            Clock clock
+    ) {
         this.kafkaTemplate = kafkaTemplate;
         this.properties = properties;
         this.observability = observability;
+        this.clock = clock;
     }
 
     public void routeFailure(ConsumerRecord<String, byte[]> failedRecord, KafkaReliableListenerEndpoint endpoint, Throwable error) {
@@ -45,6 +57,12 @@ public class KafkaRetryStrategy {
         String route = routeName(retryCount);
         String topic = topicName(endpoint, retryCount);
         ProducerRecord<String, byte[]> record = copyForRepublish(failedRecord, topic, retryCount, error);
+        if ("retry".equals(route)) {
+            KafkaRecordHeaders.put(record.headers(), ReliableMessageHeaders.RETRY_NOT_BEFORE,
+                    String.valueOf(clock.instant().plus(backoff(retryCount)).toEpochMilli()));
+        } else {
+            record.headers().remove(ReliableMessageHeaders.RETRY_NOT_BEFORE);
+        }
         observability.observe(
                 "retry".equals(route) ? "message.retry" : "message.dlq",
                 null,

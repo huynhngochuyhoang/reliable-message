@@ -7,17 +7,21 @@ import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservab
 import io.github.huynhngochuyhoang.reliablemessage.observability.MessageTags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
+import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 public class RedisIdempotencyStore implements IdempotencyStore {
 
     private static final String DEFAULT_PREFIX = "reliable-message:idempotency:";
+    private static final int MAX_START_ATTEMPTS = 3;
 
     private final StringRedisTemplate redisTemplate;
     private final String keyPrefix;
@@ -58,31 +62,45 @@ public class RedisIdempotencyStore implements IdempotencyStore {
         requireKey(key);
         requirePositiveTtl(ttl);
 
+        Instant now = clock.instant();
+        Instant expiresAt = now.plus(ttl);
         String redisKey = redisKey(key);
-        Instant expiresAt = clock.instant().plus(ttl);
-        Boolean started = redisTemplate.opsForValue().setIfAbsent(
-                redisKey,
-                encode(IdempotencyState.PROCESSING, expiresAt, null),
-                ttl
-        );
-        if (Boolean.TRUE.equals(started)) {
-            return IdempotencyStartResult.startAccepted();
-        }
+        String processingState = encode(IdempotencyState.PROCESSING, expiresAt, null);
 
-        StoredState storedState = decode(redisTemplate.opsForValue().get(redisKey));
-        if (storedState == null || !storedState.expiresAt().isAfter(clock.instant())) {
-            redisTemplate.opsForValue().set(redisKey, encode(IdempotencyState.PROCESSING, expiresAt, null), ttl);
-            return IdempotencyStartResult.startAccepted();
+        for (int attempt = 0; attempt < MAX_START_ATTEMPTS; attempt++) {
+            IdempotencyStartResult result = tryStartOnce(redisKey, processingState, ttl, now);
+            if (result != null) {
+                if (!result.started()) {
+                    observability.increment("message_duplicate_total",
+                            new MessageTags("mvc", "idempotency", "idempotency", null, "duplicate"));
+                }
+                return result;
+            }
         }
-        if (storedState.state() == IdempotencyState.FAILED) {
-            redisTemplate.opsForValue().set(redisKey, encode(IdempotencyState.PROCESSING, expiresAt, null), ttl);
-            return IdempotencyStartResult.startAccepted();
-        }
+        throw new IllegalStateException("Failed to start Redis idempotency key after concurrent updates");
+    }
 
-        IdempotencyStartResult duplicate = IdempotencyStartResult.duplicate(storedState.state());
-        observability.increment("message_duplicate_total",
-                new MessageTags("mvc", "idempotency", "idempotency", null, "duplicate"));
-        return duplicate;
+    private IdempotencyStartResult tryStartOnce(String redisKey, String processingState, Duration ttl, Instant now) {
+        return redisTemplate.execute(new SessionCallback<>() {
+            @Override
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            public IdempotencyStartResult execute(RedisOperations operations) {
+                operations.watch(redisKey);
+                String current = (String) operations.opsForValue().get(redisKey);
+                StoredState storedState = decode(current);
+                if (storedState != null
+                        && storedState.expiresAt().isAfter(now)
+                        && storedState.state() != IdempotencyState.FAILED) {
+                    operations.unwatch();
+                    return IdempotencyStartResult.duplicate(storedState.state());
+                }
+
+                operations.multi();
+                operations.opsForValue().set(redisKey, processingState, ttl);
+                List<Object> result = operations.exec();
+                return result == null ? null : IdempotencyStartResult.startAccepted();
+            }
+        });
     }
 
     @Override
@@ -100,7 +118,10 @@ public class RedisIdempotencyStore implements IdempotencyStore {
     private void updateState(String key, IdempotencyState state, String errorMessage) {
         String redisKey = redisKey(key);
         Long ttlMillis = redisTemplate.getExpire(redisKey, TimeUnit.MILLISECONDS);
-        Duration ttl = ttlMillis == null || ttlMillis <= 0 ? Duration.ofHours(24) : Duration.ofMillis(ttlMillis);
+        if (ttlMillis == null || ttlMillis == -2) {
+            return;
+        }
+        Duration ttl = ttlMillis == -1 ? Duration.ofHours(24) : Duration.ofMillis(ttlMillis);
         Instant expiresAt = clock.instant().plus(ttl);
         redisTemplate.opsForValue().set(redisKey, encode(state, expiresAt, errorMessage), ttl);
     }
@@ -122,10 +143,14 @@ public class RedisIdempotencyStore implements IdempotencyStore {
         if (parts.length < 2) {
             return null;
         }
-        return new StoredState(
-                IdempotencyState.valueOf(parts[0]),
-                Instant.ofEpochMilli(Long.parseLong(parts[1]))
-        );
+        try {
+            return new StoredState(
+                    IdempotencyState.valueOf(parts[0]),
+                    Instant.ofEpochMilli(Long.parseLong(parts[1]))
+            );
+        } catch (IllegalArgumentException error) {
+            return null;
+        }
     }
 
     private static void requireKey(String key) {
