@@ -5,6 +5,7 @@ import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
@@ -55,6 +56,16 @@ class RabbitRetryStrategyTest {
         assertEquals(3, ((Number) messageCaptor.getValue()
                 .getMessageProperties()
                 .getHeader(ReliableMessageHeaders.RETRY_COUNT)).intValue());
+    }
+
+    @Test
+    void preservesDeliveryModeWhenRepublishing() {
+        Message source = message(0);
+        source.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+
+        Message republished = RabbitRetryStrategy.copyForRepublish(source, 1, null);
+
+        assertEquals(MessageDeliveryMode.PERSISTENT, republished.getMessageProperties().getDeliveryMode());
     }
 
     private static RabbitReliableMessageProperties properties() {

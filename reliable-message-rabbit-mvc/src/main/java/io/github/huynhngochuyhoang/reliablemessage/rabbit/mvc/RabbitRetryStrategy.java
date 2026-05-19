@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -107,6 +108,10 @@ public class RabbitRetryStrategy {
         targetProperties.setContentEncoding(sourceProperties.getContentEncoding());
         targetProperties.setMessageId(sourceProperties.getMessageId());
         targetProperties.setCorrelationId(sourceProperties.getCorrelationId());
+        MessageDeliveryMode deliveryMode = sourceProperties.getDeliveryMode();
+        if (deliveryMode != null) {
+            targetProperties.setDeliveryMode(deliveryMode);
+        }
         return new Message(source.getBody(), targetProperties);
     }
 
