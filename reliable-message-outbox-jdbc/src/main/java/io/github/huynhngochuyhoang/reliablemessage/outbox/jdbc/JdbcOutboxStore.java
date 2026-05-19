@@ -151,7 +151,7 @@ public class JdbcOutboxStore implements OutboxStore {
         jdbcTemplate.update("""
                         update message_outbox
                         set status = ?, published_at = ?, last_error = null, processing_started_at = null
-                        where id = ?
+                        where id = ? and status = ?
                         """,
                 MessageStatus.PUBLISHED.name(),
                 Timestamp.from(clock.instant()),
@@ -165,12 +165,13 @@ public class JdbcOutboxStore implements OutboxStore {
         jdbcTemplate.update("""
                         update message_outbox
                         set status = ?, retry_count = retry_count + 1, next_retry_at = ?, last_error = ?, processing_started_at = null
-                        where id = ?
+                        where id = ? and status = ?
                         """,
                 MessageStatus.FAILED.name(),
                 timestamp(nextRetryAt),
                 error == null ? null : error.getMessage(),
-                id
+                id,
+                MessageStatus.PROCESSING.name()
         );
     }
 
@@ -200,7 +201,7 @@ public class JdbcOutboxStore implements OutboxStore {
                         select id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
                                status, retry_count, next_retry_at, created_at, published_at, last_error
                         from message_outbox
-                        where id = ?
+                        where id = ? and status = ?
                         """,
                 this::mapRow,
                 id

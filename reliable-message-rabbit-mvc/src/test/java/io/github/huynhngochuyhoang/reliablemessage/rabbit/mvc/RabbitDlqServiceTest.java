@@ -33,7 +33,7 @@ class RabbitDlqServiceTest {
         org.mockito.ArgumentCaptor<Message> messageCaptor = forClass(Message.class);
         verify(rabbitTemplate).send(
                 org.mockito.Mockito.eq("app.events"),
-                org.mockito.Mockito.eq("order-service.order.created"),
+                org.mockito.Mockito.eq("order.created"),
                 messageCaptor.capture()
         );
         assertEquals(0, ((Number) messageCaptor.getValue()

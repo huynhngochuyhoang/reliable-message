@@ -110,7 +110,7 @@ public class RabbitReliableMessageHandler implements ChannelAwareMessageListener
                     "message.consume",
                     "message_consume_duration",
                     MessageTags.mvcRabbit(endpoint.eventName(), endpoint.queueName(), "failed"),
-                    () -> { throw error; }
+                    () -> null
             );
             consumeCounter("failed");
             if (!routeFailure(message, channel, error)) {

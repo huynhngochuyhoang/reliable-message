@@ -112,7 +112,7 @@ public class KafkaReliableMessageHandler implements AcknowledgingMessageListener
                     "message.consume",
                     "message_consume_duration",
                     MessageTags.mvcKafka(endpoint.eventName(), endpoint.consumerGroup(), "failed"),
-                    () -> { throw error; }
+                    () -> null
             );
             consumeCounter("failed");
             routeFailure(record, acknowledgment, error);

@@ -113,6 +113,12 @@ class ReliableMessageAdminAutoConfigurationTest {
             ));
         }
 
+
+        @Override
+        public List<OutboxMessage> findForAdmin(int limit) {
+            return findPending(limit);
+        }
+
         @Override
         public void markPublished(String id) {
         }

@@ -77,6 +77,18 @@ class JdbcOutboxStoreTest {
         assertEquals(0, testStore.store.findPending(10).size());
     }
 
+
+    @Test
+    void markFailedDoesNotOverwritePublishedRows() {
+        TestStore testStore = store();
+        testStore.store.save(message("event-1"));
+
+        testStore.store.markPublished("event-1");
+        testStore.store.markFailed("event-1", new IllegalStateException("late failure"), NOW.plusSeconds(30));
+
+        assertEquals(MessageStatus.PUBLISHED.name(), status(testStore, "event-1"));
+    }
+
     @Test
     void failedRowsAreRetriedAfterNextRetryAt() {
         TestStore testStore = store();

@@ -10,7 +10,7 @@ public interface OutboxStore {
     List<OutboxMessage> findPending(int limit);
 
     default List<OutboxMessage> findForAdmin(int limit) {
-        return findPending(limit);
+        throw new UnsupportedOperationException("Admin outbox listing is not supported for this store");
     }
 
     void markPublished(String id);
