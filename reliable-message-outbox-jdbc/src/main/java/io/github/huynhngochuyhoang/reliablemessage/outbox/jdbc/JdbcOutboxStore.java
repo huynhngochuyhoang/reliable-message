@@ -88,21 +88,24 @@ public class JdbcOutboxStore implements OutboxStore {
             throw new IllegalArgumentException("limit must be positive");
         }
         Instant now = clock.instant();
-        return jdbcTemplate.query("""
-                        select id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
-                               status, retry_count, next_retry_at, created_at, published_at, last_error
+        List<String> candidateIds = jdbcTemplate.queryForList("""
+                        select id
                         from message_outbox
                         where status = ?
                            or (status = ? and (next_retry_at is null or next_retry_at <= ?))
                         order by created_at asc
                         limit ?
                         """,
-                this::mapRow,
+                String.class,
                 MessageStatus.PENDING.name(),
                 MessageStatus.FAILED.name(),
                 Timestamp.from(now),
                 limit
         );
+        return candidateIds.stream()
+                .filter(id -> claim(id, now))
+                .map(this::findById)
+                .toList();
     }
 
     @Override
@@ -130,6 +133,35 @@ public class JdbcOutboxStore implements OutboxStore {
                 MessageStatus.FAILED.name(),
                 timestamp(nextRetryAt),
                 error == null ? null : error.getMessage(),
+                id
+        );
+    }
+
+    private boolean claim(String id, Instant now) {
+        int updated = jdbcTemplate.update("""
+                        update message_outbox
+                        set status = ?
+                        where id = ?
+                          and (status = ?
+                            or (status = ? and (next_retry_at is null or next_retry_at <= ?)))
+                        """,
+                MessageStatus.PROCESSING.name(),
+                id,
+                MessageStatus.PENDING.name(),
+                MessageStatus.FAILED.name(),
+                Timestamp.from(now)
+        );
+        return updated == 1;
+    }
+
+    private OutboxMessage findById(String id) {
+        return jdbcTemplate.queryForObject("""
+                        select id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
+                               status, retry_count, next_retry_at, created_at, published_at, last_error
+                        from message_outbox
+                        where id = ?
+                        """,
+                this::mapRow,
                 id
         );
     }

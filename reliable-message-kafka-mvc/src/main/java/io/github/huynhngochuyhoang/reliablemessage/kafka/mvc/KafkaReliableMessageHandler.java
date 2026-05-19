@@ -67,7 +67,9 @@ public class KafkaReliableMessageHandler implements AcknowledgingMessageListener
         boolean idempotencyStarted = false;
         ReliableMessage<?> reliableMessage = null;
         try {
-            awaitRetryDue(record);
+            if (!isRetryDue(record, acknowledgment)) {
+                return;
+            }
             reliableMessage = serializer.deserialize(record.value(), endpoint.payloadType());
             try (MessageMdc.Scope ignored = MessageMdc.apply(reliableMessage.headers())) {
                 if (isIdempotencyEnabled(reliableMessage)) {
@@ -109,21 +111,17 @@ public class KafkaReliableMessageHandler implements AcknowledgingMessageListener
         }
     }
 
-    private void awaitRetryDue(ConsumerRecord<String, byte[]> record) {
+    private boolean isRetryDue(ConsumerRecord<String, byte[]> record, Acknowledgment acknowledgment) {
         String retryNotBefore = KafkaRecordHeaders.value(record.headers(), ReliableMessageHeaders.RETRY_NOT_BEFORE);
         if (retryNotBefore == null || retryNotBefore.isBlank()) {
-            return;
+            return true;
         }
         long delayMillis = Long.parseLong(retryNotBefore) - Instant.now().toEpochMilli();
         if (delayMillis <= 0) {
-            return;
+            return true;
         }
-        try {
-            Thread.sleep(delayMillis);
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for Kafka reliable message retry delay", error);
-        }
+        acknowledgment.nack(Duration.ofMillis(delayMillis));
+        return false;
     }
 
     private boolean isIdempotencyEnabled(ReliableMessage<?> reliableMessage) {

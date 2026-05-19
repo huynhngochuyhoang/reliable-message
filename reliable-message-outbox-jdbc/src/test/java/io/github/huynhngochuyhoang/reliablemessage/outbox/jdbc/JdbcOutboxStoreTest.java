@@ -54,6 +54,19 @@ class JdbcOutboxStoreTest {
     }
 
     @Test
+    void claimedRowsAreNotReturnedAgain() {
+        TestStore testStore = store();
+        testStore.store.save(message("event-1"));
+
+        var firstClaim = testStore.store.findPending(10);
+        var secondClaim = testStore.store.findPending(10);
+
+        assertEquals(1, firstClaim.size());
+        assertEquals(MessageStatus.PROCESSING, firstClaim.getFirst().status());
+        assertEquals(0, secondClaim.size());
+    }
+
+    @Test
     void marksPublishedRows() {
         TestStore testStore = store();
         testStore.store.save(message("event-1"));
@@ -78,7 +91,7 @@ class JdbcOutboxStoreTest {
 
         var messages = retryStore.findPending(10);
         assertEquals(1, messages.size());
-        assertEquals(MessageStatus.FAILED, messages.getFirst().status());
+        assertEquals(MessageStatus.PROCESSING, messages.getFirst().status());
         assertEquals(1, messages.getFirst().retryCount());
         assertEquals("broker down", messages.getFirst().lastError());
     }

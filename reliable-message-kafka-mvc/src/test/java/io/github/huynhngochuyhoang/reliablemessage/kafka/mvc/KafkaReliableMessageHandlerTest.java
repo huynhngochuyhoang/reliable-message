@@ -2,6 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.kafka.mvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
+import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
@@ -73,6 +74,22 @@ class KafkaReliableMessageHandlerTest {
         verify(kafkaTemplate).send(recordCaptor.capture());
         assertEquals("app.order.created.order-service.retry.5s", recordCaptor.getValue().topic());
         verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void nacksEarlyRetryRecordsWithoutSleepingOrInvokingHandler() throws Exception {
+        TestListener listener = new TestListener();
+        KafkaReliableMessageHandler handler = handler(listener, "handle", null, null);
+        Acknowledgment acknowledgment = org.mockito.Mockito.mock(Acknowledgment.class);
+        ConsumerRecord<String, byte[]> record = record();
+        KafkaRecordHeaders.put(record.headers(), ReliableMessageHeaders.RETRY_NOT_BEFORE,
+                String.valueOf(Instant.now().plusSeconds(30).toEpochMilli()));
+
+        handler.onMessage(record, acknowledgment);
+
+        assertNull(listener.lastMessage);
+        verify(acknowledgment).nack(any(Duration.class));
+        verify(acknowledgment, never()).acknowledge();
     }
 
     @Test
