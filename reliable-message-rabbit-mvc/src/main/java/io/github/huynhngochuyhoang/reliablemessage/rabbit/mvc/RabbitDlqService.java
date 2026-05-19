@@ -49,7 +49,7 @@ public class RabbitDlqService {
                 "message.dlq",
                 null,
                 MessageTags.mvcRabbit(eventName, properties.queueName(eventName), "retry"),
-                () -> rabbitTemplate.send(properties.getRabbit().getExchange(), eventName, message)
+                () -> rabbitTemplate.send(properties.getRabbit().getExchange(), properties.queueName(eventName), message)
         );
         operationCounter("retry", eventName, properties.queueName(eventName));
     }

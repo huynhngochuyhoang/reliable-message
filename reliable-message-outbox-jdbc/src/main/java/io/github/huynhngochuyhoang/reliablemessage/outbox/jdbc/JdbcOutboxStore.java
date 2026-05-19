@@ -117,6 +117,34 @@ public class JdbcOutboxStore implements OutboxStore {
                 .toList();
     }
 
+
+    @Override
+    public List<OutboxMessage> findForAdmin(int limit) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        Instant now = clock.instant();
+        Instant expiredProcessingBefore = now.minus(PROCESSING_LEASE_DURATION);
+        return jdbcTemplate.query("""
+                        select id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
+                               status, retry_count, next_retry_at, created_at, published_at, last_error
+                        from message_outbox
+                        where status = ?
+                           or (status = ? and (next_retry_at is null or next_retry_at <= ?))
+                           or (status = ? and processing_started_at <= ?)
+                        order by created_at asc
+                        limit ?
+                        """,
+                this::mapRow,
+                MessageStatus.PENDING.name(),
+                MessageStatus.FAILED.name(),
+                Timestamp.from(now),
+                MessageStatus.PROCESSING.name(),
+                Timestamp.from(expiredProcessingBefore),
+                limit
+        );
+    }
+
     @Override
     public void markPublished(String id) {
         requireId(id);

@@ -35,7 +35,7 @@ public class OutboxAdminController {
 
     @GetMapping
     public List<OutboxMessage> find(@RequestParam(required = false) Integer limit) {
-        return outboxStore.findPending(properties.clampLimit(limit));
+        return outboxStore.findForAdmin(properties.clampLimit(limit));
     }
 
     @PostMapping("/{id}/retry")

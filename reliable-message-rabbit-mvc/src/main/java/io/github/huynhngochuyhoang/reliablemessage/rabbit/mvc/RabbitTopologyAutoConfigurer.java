@@ -40,7 +40,7 @@ public class RabbitTopologyAutoConfigurer {
             Queue retryQueue = QueueBuilder.durable(RabbitTopologyNames.retryQueueName(queueName, delay))
                     .ttl(Math.toIntExact(delay.toMillis()))
                     .deadLetterExchange(properties.getRabbit().getExchange())
-                    .deadLetterRoutingKey(eventName)
+                    .deadLetterRoutingKey(queueName)
                     .build();
             rabbitAdmin.declareQueue(retryQueue);
             rabbitAdmin.declareBinding(BindingBuilder.bind(retryQueue)

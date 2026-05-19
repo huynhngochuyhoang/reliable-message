@@ -83,7 +83,9 @@ public class KafkaReliableMessageHandler implements AcknowledgingMessageListener
                     if (!startResult.started()) {
                         observability.increment("message_duplicate_total", MessageTags.mvcKafka(endpoint.eventName(), endpoint.consumerGroup(), "duplicate"));
                         consumeCounter("duplicate");
-                        acknowledgment.acknowledge();
+                        if (startResult.state() == io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyState.SUCCESS) {
+                            acknowledgment.acknowledge();
+                        }
                         return;
                     }
                     idempotencyStarted = true;
@@ -106,6 +108,12 @@ public class KafkaReliableMessageHandler implements AcknowledgingMessageListener
             if (idempotencyStarted) {
                 markFailed(reliableMessage, error);
             }
+            observability.observe(
+                    "message.consume",
+                    "message_consume_duration",
+                    MessageTags.mvcKafka(endpoint.eventName(), endpoint.consumerGroup(), "failed"),
+                    () -> { throw error; }
+            );
             consumeCounter("failed");
             routeFailure(record, acknowledgment, error);
         }

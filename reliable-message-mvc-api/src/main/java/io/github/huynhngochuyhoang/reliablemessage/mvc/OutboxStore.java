@@ -9,6 +9,10 @@ public interface OutboxStore {
 
     List<OutboxMessage> findPending(int limit);
 
+    default List<OutboxMessage> findForAdmin(int limit) {
+        return findPending(limit);
+    }
+
     void markPublished(String id);
 
     void markFailed(String id, Throwable error, Instant nextRetryAt);

@@ -92,6 +92,22 @@ class KafkaReliableMessageHandlerTest {
         verify(acknowledgment, never()).acknowledge();
     }
 
+
+    @Test
+    void doesNotCommitOffsetForInFlightDuplicate() throws Exception {
+        TestListener listener = new TestListener();
+        TestIdempotencyStore idempotencyStore = new TestIdempotencyStore(
+                IdempotencyStartResult.duplicate(IdempotencyState.PROCESSING)
+        );
+        KafkaReliableMessageHandler handler = handler(listener, "handle", idempotencyStore, null);
+        Acknowledgment acknowledgment = org.mockito.Mockito.mock(Acknowledgment.class);
+
+        handler.onMessage(record(), acknowledgment);
+
+        assertNull(listener.lastMessage);
+        verify(acknowledgment, never()).acknowledge();
+    }
+
     @Test
     void acknowledgesDuplicateWithoutInvokingHandler() throws Exception {
         TestListener listener = new TestListener();

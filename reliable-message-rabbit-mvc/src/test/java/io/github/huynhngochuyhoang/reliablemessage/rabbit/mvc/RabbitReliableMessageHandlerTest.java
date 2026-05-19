@@ -87,6 +87,23 @@ class RabbitReliableMessageHandlerTest {
         verify(channel, never()).basicNack(42L, false, true);
     }
 
+
+    @Test
+    void requeuesInFlightDuplicateWithoutAcknowledging() throws Exception {
+        TestListener listener = new TestListener();
+        TestIdempotencyStore idempotencyStore = new TestIdempotencyStore(
+                IdempotencyStartResult.duplicate(IdempotencyState.PROCESSING)
+        );
+        RabbitReliableMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        Channel channel = org.mockito.Mockito.mock(Channel.class);
+
+        handler.onMessage(message(), channel);
+
+        assertNull(listener.lastMessage);
+        verify(channel, never()).basicAck(42L, false);
+        verify(channel).basicNack(42L, false, true);
+    }
+
     @Test
     void marksIdempotencyFailedWhenHandlerFails() throws Exception {
         FailingListener listener = new FailingListener();

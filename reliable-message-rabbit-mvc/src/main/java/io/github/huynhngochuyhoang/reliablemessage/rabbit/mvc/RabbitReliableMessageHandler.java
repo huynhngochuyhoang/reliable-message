@@ -79,7 +79,11 @@ public class RabbitReliableMessageHandler implements ChannelAwareMessageListener
                     if (!startResult.started()) {
                         observability.increment("message_duplicate_total", MessageTags.mvcRabbit(endpoint.eventName(), endpoint.queueName(), "duplicate"));
                         consumeCounter("duplicate");
-                        channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+                        if (startResult.state() == io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyState.SUCCESS) {
+                            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+                        } else {
+                            channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
+                        }
                         return;
                     }
                     idempotencyStarted = true;
@@ -102,6 +106,12 @@ public class RabbitReliableMessageHandler implements ChannelAwareMessageListener
             if (idempotencyStarted) {
                 markFailed(reliableMessage, error);
             }
+            observability.observe(
+                    "message.consume",
+                    "message_consume_duration",
+                    MessageTags.mvcRabbit(endpoint.eventName(), endpoint.queueName(), "failed"),
+                    () -> { throw error; }
+            );
             consumeCounter("failed");
             if (!routeFailure(message, channel, error)) {
                 throw error;
