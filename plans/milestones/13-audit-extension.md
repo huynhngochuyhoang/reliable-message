@@ -839,3 +839,11 @@ audit disabled unless explicitly enabled
 ```
 
 This gives normal systems safe defaults while allowing banking systems to plug in strict audit behavior.
+
+---
+
+# 20. Status
+
+- [ ] Not started
+- [ ] In progress
+- [x] Done

@@ -18,11 +18,22 @@
         <module>reliable-message-idempotency-jdbc</module>
         <module>reliable-message-idempotency-redis</module>
         <module>reliable-message-outbox-jdbc</module>
+        <module>reliable-message-outbox-r2dbc</module>
+        <module>reliable-message-idempotency-r2dbc</module>
+        <module>reliable-message-idempotency-redis-reactive</module>
         <module>reliable-message-rabbit-mvc</module>
         <module>reliable-message-kafka-mvc</module>
+        <module>reliable-message-kafka-webflux</module>
+        <module>reliable-message-rpc-core</module>
+        <module>reliable-message-rpc-mvc</module>
+        <module>reliable-message-rpc-webflux</module>
+        <module>reliable-message-audit-core</module>
+        <module>reliable-message-audit-mvc</module>
+        <module>reliable-message-audit-webflux</module>
         <module>reliable-message-observability</module>
         <module>reliable-message-admin-api</module>
         <module>reliable-message-mvc-starter</module>
+        <module>reliable-message-webflux-starter</module>
     </modules>
 
     <properties>

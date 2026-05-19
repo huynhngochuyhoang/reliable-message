@@ -1,0 +1,133 @@
+package io.github.huynhngochuyhoang.reliablemessage.outbox.r2dbc;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.huynhngochuyhoang.reliablemessage.core.MessageStatus;
+import io.github.huynhngochuyhoang.reliablemessage.core.PublishOptions;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.OutboxMessage;
+import io.r2dbc.spi.ConnectionFactories;
+import io.r2dbc.spi.ConnectionFactory;
+import org.junit.jupiter.api.Test;
+import org.springframework.r2dbc.connection.R2dbcTransactionManager;
+import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.transaction.reactive.TransactionalOperator;
+import reactor.test.StepVerifier;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.UUID;
+
+class R2dbcOutboxStoreTest {
+
+    private static final Instant NOW = Instant.parse("2026-05-18T00:00:00Z");
+
+    @Test
+    void savesOutboxRowInCallerReactiveTransaction() {
+        TestStore testStore = store();
+        TransactionalOperator transaction = TransactionalOperator.create(new R2dbcTransactionManager(testStore.connectionFactory));
+
+        StepVerifier.create(testStore.store.initializeSchema()
+                        .then(testStore.databaseClient.sql("create table orders (id varchar(64) primary key)")
+                                .fetch()
+                                .rowsUpdated()
+                                .then())
+                        .thenMany(transaction.execute(status ->
+                                testStore.databaseClient.sql("insert into orders (id) values (:id)")
+                                        .bind("id", "order-1")
+                                        .fetch()
+                                        .rowsUpdated()
+                                        .then(testStore.store.save(message("event-1")))
+                        ))
+                        .then(count(testStore.databaseClient, "orders"))
+                        .zipWith(count(testStore.databaseClient, "message_outbox")))
+                .expectNextMatches(counts -> counts.getT1() == 1 && counts.getT2() == 1)
+                .verifyComplete();
+    }
+
+    @Test
+    void findsPendingRowsAndClaimsThem() {
+        TestStore testStore = store();
+
+        StepVerifier.create(testStore.store.initializeSchema()
+                        .then(testStore.store.save(message("event-1")))
+                        .thenMany(testStore.store.findPending(10))
+                        .collectList())
+                .expectNextMatches(messages ->
+                        messages.size() == 1
+                                && messages.getFirst().status() == MessageStatus.PROCESSING
+                                && "order-1".equals(((JsonNode) messages.getFirst().payload()).get("orderId").asText()))
+                .verifyComplete();
+
+        StepVerifier.create(testStore.store.findPending(10).collectList())
+                .expectNextMatches(messages -> messages.isEmpty())
+                .verifyComplete();
+    }
+
+    @Test
+    void marksClaimedRowsPublished() {
+        TestStore testStore = store();
+
+        StepVerifier.create(testStore.store.initializeSchema()
+                        .then(testStore.store.save(message("event-1")))
+                        .thenMany(testStore.store.findPending(10))
+                        .then(testStore.store.markPublished("event-1"))
+                        .then(status(testStore.databaseClient, "event-1")))
+                .expectNext(MessageStatus.PUBLISHED.name())
+                .verifyComplete();
+    }
+
+    private static OutboxMessage message(String id) {
+        return new OutboxMessage(
+                id,
+                "order.created",
+                "order-1",
+                "event-1",
+                "order-1",
+                new OrderCreated("order-1"),
+                PublishOptions.builder().correlationId("correlation-1").build().headers(),
+                MessageStatus.PENDING,
+                0,
+                null,
+                NOW,
+                null,
+                null
+        );
+    }
+
+    private static reactor.core.publisher.Mono<Long> count(DatabaseClient databaseClient, String table) {
+        return databaseClient.sql("select count(*) as row_count from " + table)
+                .map((row, metadata) -> row.get("row_count", Long.class))
+                .one();
+    }
+
+    private static reactor.core.publisher.Mono<String> status(DatabaseClient databaseClient, String id) {
+        return databaseClient.sql("select status from message_outbox where id = :id")
+                .bind("id", id)
+                .map((row, metadata) -> row.get("status", String.class))
+                .one();
+    }
+
+    private static TestStore store() {
+        ConnectionFactory connectionFactory = ConnectionFactories.get(
+                "r2dbc:h2:mem:///" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+        );
+        DatabaseClient databaseClient = DatabaseClient.create(connectionFactory);
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        return new TestStore(
+                connectionFactory,
+                databaseClient,
+                new R2dbcOutboxStore(databaseClient, new ObjectMapper(), clock)
+        );
+    }
+
+    private record OrderCreated(String orderId) {
+    }
+
+    private record TestStore(
+            ConnectionFactory connectionFactory,
+            DatabaseClient databaseClient,
+            R2dbcOutboxStore store
+    ) {
+    }
+}

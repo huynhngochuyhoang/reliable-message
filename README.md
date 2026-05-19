@@ -1,87 +1,46 @@
 # reliable-message
 
-Opinionated reliability and observability framework for message-driven Spring Boot systems.
+Practical reliability tools for message-driven Spring Boot services.
 
-This project is not an exactly-once messaging framework. It is a toolkit for building services that need practical message reliability patterns:
+`reliable-message` helps services publish and consume messages with safer operational defaults:
 
-- effectively-once processing
 - outbox publishing
 - idempotent consumers
-- retry conventions
-- dead-letter handling
-- tracing, metrics, and correlation propagation
-- internal admin operations for outbox, DLQ, and idempotency state
+- retry and dead-letter conventions
+- correlation, tracing, and metrics
+- optional RPC propagation
+- optional compliance audit hooks
 
-## What We Are Building
+It is not an exactly-once messaging framework. It provides the patterns teams usually need to build effectively-once workflows on top of RabbitMQ, Kafka, JDBC, R2DBC, Redis, MVC, and WebFlux.
 
-The framework is split into two runtime stacks:
+## Quick Start
 
-- Spring MVC / blocking services
-- Spring WebFlux / reactive services
+For usage, configuration, and existing-system adoption, start here:
 
-The initial production target is:
+[docs/how-to-use.md](docs/how-to-use.md)
 
-```text
-MVC + RabbitMQ + JDBC outbox + idempotency + observability
-```
+## Choose A Stack
 
-After that is stable, the roadmap expands to MVC Kafka, then WebFlux Kafka with R2DBC and Reactive Redis.
+| Application style | Recommended path |
+| --- | --- |
+| Spring MVC + RabbitMQ | `reliable-message-mvc-starter` |
+| Spring MVC + Kafka | `reliable-message-mvc-starter` + `reliable-message-kafka-mvc` |
+| Spring WebFlux + Kafka | `reliable-message-webflux-starter` + `reliable-message-kafka-webflux` |
+| WebFlux persistence | R2DBC or Reactive Redis modules |
+| RPC propagation | `reliable-message-rpc-mvc` or `reliable-message-rpc-webflux` |
+| Audit logging | `reliable-message-audit-mvc` or `reliable-message-audit-webflux` |
 
-See [docs/mvc-rabbit-milestone-01-06.md](docs/mvc-rabbit-milestone-01-06.md) for the completed Milestone 01-06 MVC Rabbit documentation.
-See [docs/mvc-kafka-milestone-07.md](docs/mvc-kafka-milestone-07.md) for the completed Milestone 07 MVC Kafka documentation.
+RabbitMQ is production-oriented for MVC. WebFlux services should use Kafka today; WebFlux RabbitMQ is documented as future/experimental research, not stable support.
 
-## Project Environment
-
-- JDK: 21
-- Maven: 3.8.x
-- Spring Boot: 3.5.x
-
-## Current Milestone
-
-Milestone 07 adds blocking MVC Kafka support alongside the existing MVC Rabbit path.
-
-Current modules:
-
-- `reliable-message-core`
-- `reliable-message-mvc-api`
-- `reliable-message-idempotency-jdbc`
-- `reliable-message-idempotency-redis`
-- `reliable-message-outbox-jdbc`
-- `reliable-message-rabbit-mvc`
-- `reliable-message-kafka-mvc`
-- `reliable-message-observability`
-- `reliable-message-admin-api`
-- `reliable-message-mvc-starter`
-
-`reliable-message-core` is the runtime-neutral API shared by all future stacks.
-
-It contains:
-
-- `ReliableMessage`
-- `PublishOptions`
-- common message headers
-- serializer abstraction
-- retry metadata
-- error model
-- message status model
-- dead-letter record model
-
-The core module must not depend on Spring MVC, WebFlux, JDBC, R2DBC, RabbitMQ, Kafka, or Redis.
-
-`reliable-message-mvc-starter` provides the blocking MVC programming model and pulls in the RabbitMQ and Kafka MVC adapters.
-It also brings the JDBC outbox, JDBC idempotency provider, observability module, and disabled-by-default admin API for the MVC stack.
-
-For idempotency, applications should normally use one provider module. The MVC starter already includes `reliable-message-idempotency-jdbc`; `reliable-message-idempotency-redis` is an alternative provider for applications that intentionally store idempotency state in Redis.
-
-## MVC RabbitMQ MVP
+## MVC Example
 
 Add the starter:
 
 ```xml
 <dependency>
-    <groupId>io.github.huynhngochuyhoang</groupId>
-    <artifactId>reliable-message-mvc-starter</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-mvc-starter</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -108,21 +67,90 @@ public void handle(ReliableMessage<OrderCreatedEvent> message) {
 }
 ```
 
-Configuration:
+## WebFlux Example
 
-```yaml
-message:
-  reliability:
-    runtime: mvc
-    transport: rabbit
-    service-name: order-service
-    rabbit:
-      exchange: app.events
-      auto-declare: true
-      publisher-confirm: true
-      listener-auto-startup: true
+Publish:
+
+```java
+return reactivePublisher.publish(
+    "order.created",
+    event,
+    PublishOptions.builder()
+        .aggregateId(orderId)
+        .idempotencyKey(eventId)
+        .correlationId(correlationId)
+        .partitionKey(orderId)
+        .build()
+);
 ```
 
-## Roadmap Tracking
+Consume:
 
-See [plans/README.md](plans/README.md) for milestone tracking docs linked back to the design source.
+```java
+@ReactiveReliableListener("order.created")
+public Mono<Void> handle(ReliableMessage<OrderCreatedEvent> message) {
+    return orderService.handle(message.payload());
+}
+```
+
+WebFlux listener methods must return `Mono<Void>`.
+
+## Modules
+
+Core messaging:
+
+- `reliable-message-core`
+- `reliable-message-mvc-api`
+- `reliable-message-mvc-starter`
+- `reliable-message-webflux-starter`
+
+Transports:
+
+- `reliable-message-rabbit-mvc`
+- `reliable-message-kafka-mvc`
+- `reliable-message-kafka-webflux`
+
+Storage:
+
+- `reliable-message-outbox-jdbc`
+- `reliable-message-outbox-r2dbc`
+- `reliable-message-idempotency-jdbc`
+- `reliable-message-idempotency-r2dbc`
+- `reliable-message-idempotency-redis`
+- `reliable-message-idempotency-redis-reactive`
+
+Operations and extensions:
+
+- `reliable-message-observability`
+- `reliable-message-admin-api`
+- `reliable-message-rpc-core`
+- `reliable-message-rpc-mvc`
+- `reliable-message-rpc-webflux`
+- `reliable-message-audit-core`
+- `reliable-message-audit-mvc`
+- `reliable-message-audit-webflux`
+
+## Documentation
+
+- [How to use](docs/how-to-use.md)
+- [MVC RabbitMQ](docs/mvc-rabbit-milestone-01-06.md)
+- [MVC Kafka](docs/mvc-kafka-milestone-07.md)
+- [WebFlux core](docs/webflux-core-milestone-08.md)
+- [WebFlux storage](docs/webflux-storage-milestone-09.md)
+- [WebFlux Kafka](docs/webflux-kafka-milestone-10.md)
+- [WebFlux Rabbit research](docs/webflux-rabbit-research-milestone-11.md)
+- [RPC extension](docs/rpc-extension-milestone-12.md)
+- [Audit extension](docs/audit-extension-milestone-13.md)
+- [Roadmap plans](plans/README.md)
+
+## Requirements
+
+- JDK 21
+- Maven 3.8+
+- Spring Boot 3.5.x
+
+## Verify
+
+```bash
+mvn test
+```
