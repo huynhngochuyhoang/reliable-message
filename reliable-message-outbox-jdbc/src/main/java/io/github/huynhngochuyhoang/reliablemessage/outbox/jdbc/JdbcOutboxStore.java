@@ -13,12 +13,15 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 public class JdbcOutboxStore implements OutboxStore {
+
+    private static final Duration PROCESSING_LEASE_DURATION = Duration.ofMinutes(5);
 
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {
     };
@@ -50,6 +53,7 @@ public class JdbcOutboxStore implements OutboxStore {
                     status varchar(32) not null,
                     retry_count int not null default 0,
                     next_retry_at timestamp,
+                    processing_started_at timestamp,
                     created_at timestamp not null,
                     published_at timestamp,
                     last_error text
@@ -63,8 +67,8 @@ public class JdbcOutboxStore implements OutboxStore {
         jdbcTemplate.update("""
                         insert into message_outbox
                         (id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
-                         status, retry_count, next_retry_at, created_at, published_at, last_error)
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         status, retry_count, next_retry_at, processing_started_at, created_at, published_at, last_error)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 message.id(),
                 message.eventName(),
@@ -76,6 +80,7 @@ public class JdbcOutboxStore implements OutboxStore {
                 message.status().name(),
                 message.retryCount(),
                 timestamp(message.nextRetryAt()),
+                null,
                 Timestamp.from(message.createdAt()),
                 timestamp(message.publishedAt()),
                 message.lastError()
@@ -88,11 +93,13 @@ public class JdbcOutboxStore implements OutboxStore {
             throw new IllegalArgumentException("limit must be positive");
         }
         Instant now = clock.instant();
+        Instant expiredProcessingBefore = now.minus(PROCESSING_LEASE_DURATION);
         List<String> candidateIds = jdbcTemplate.queryForList("""
                         select id
                         from message_outbox
                         where status = ?
                            or (status = ? and (next_retry_at is null or next_retry_at <= ?))
+                           or (status = ? and processing_started_at <= ?)
                         order by created_at asc
                         limit ?
                         """,
@@ -100,6 +107,8 @@ public class JdbcOutboxStore implements OutboxStore {
                 MessageStatus.PENDING.name(),
                 MessageStatus.FAILED.name(),
                 Timestamp.from(now),
+                MessageStatus.PROCESSING.name(),
+                Timestamp.from(expiredProcessingBefore),
                 limit
         );
         return candidateIds.stream()
@@ -113,7 +122,7 @@ public class JdbcOutboxStore implements OutboxStore {
         requireId(id);
         jdbcTemplate.update("""
                         update message_outbox
-                        set status = ?, published_at = ?, last_error = null
+                        set status = ?, published_at = ?, last_error = null, processing_started_at = null
                         where id = ?
                         """,
                 MessageStatus.PUBLISHED.name(),
@@ -127,7 +136,7 @@ public class JdbcOutboxStore implements OutboxStore {
         requireId(id);
         jdbcTemplate.update("""
                         update message_outbox
-                        set status = ?, retry_count = retry_count + 1, next_retry_at = ?, last_error = ?
+                        set status = ?, retry_count = retry_count + 1, next_retry_at = ?, last_error = ?, processing_started_at = null
                         where id = ?
                         """,
                 MessageStatus.FAILED.name(),
@@ -140,16 +149,20 @@ public class JdbcOutboxStore implements OutboxStore {
     private boolean claim(String id, Instant now) {
         int updated = jdbcTemplate.update("""
                         update message_outbox
-                        set status = ?
+                        set status = ?, processing_started_at = ?
                         where id = ?
                           and (status = ?
-                            or (status = ? and (next_retry_at is null or next_retry_at <= ?)))
+                            or (status = ? and (next_retry_at is null or next_retry_at <= ?))
+                            or (status = ? and processing_started_at <= ?))
                         """,
                 MessageStatus.PROCESSING.name(),
+                Timestamp.from(now),
                 id,
                 MessageStatus.PENDING.name(),
                 MessageStatus.FAILED.name(),
-                Timestamp.from(now)
+                Timestamp.from(now),
+                MessageStatus.PROCESSING.name(),
+                Timestamp.from(now.minus(PROCESSING_LEASE_DURATION))
         );
         return updated == 1;
     }

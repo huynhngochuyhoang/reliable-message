@@ -13,6 +13,7 @@ import io.micrometer.observation.ObservationRegistry;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.time.Clock;
@@ -104,7 +105,7 @@ public class RabbitReliablePublisher implements ReliablePublisher {
 
     private void send(String eventName, Message message) {
         String exchange = properties.getRabbit().getExchange();
-        if (!properties.getRabbit().isPublisherConfirm()) {
+        if (!shouldUsePublisherConfirm()) {
             rabbitTemplate.send(exchange, eventName, message);
             return;
         }
@@ -115,6 +116,16 @@ public class RabbitReliablePublisher implements ReliablePublisher {
             operations.waitForConfirmsOrDie(timeoutMillis);
             return null;
         });
+    }
+
+    private boolean shouldUsePublisherConfirm() {
+        if (!properties.getRabbit().isPublisherConfirm()) {
+            return false;
+        }
+        if (!(rabbitTemplate.getConnectionFactory() instanceof CachingConnectionFactory cachingConnectionFactory)) {
+            return false;
+        }
+        return cachingConnectionFactory.getPublisherConfirmType() != CachingConnectionFactory.ConfirmType.NONE;
     }
 
     private static void putIfPresent(Map<String, String> headers, String name, String value) {

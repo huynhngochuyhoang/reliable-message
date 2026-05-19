@@ -96,6 +96,23 @@ class JdbcOutboxStoreTest {
         assertEquals("broker down", messages.getFirst().lastError());
     }
 
+    @Test
+    void expiredProcessingRowsAreClaimedAgain() {
+        TestStore testStore = store();
+        testStore.store.save(message("event-1"));
+
+        var firstClaim = testStore.store.findPending(10);
+        assertEquals(1, firstClaim.size());
+
+        testStore.clock = Clock.fixed(NOW.plusSeconds(301), ZoneOffset.UTC);
+        JdbcOutboxStore recoveryStore = new JdbcOutboxStore(testStore.jdbcTemplate, new ObjectMapper(), testStore.clock);
+
+        var recoveredClaim = recoveryStore.findPending(10);
+        assertEquals(1, recoveredClaim.size());
+        assertEquals("event-1", recoveredClaim.getFirst().id());
+        assertEquals(MessageStatus.PROCESSING, recoveredClaim.getFirst().status());
+    }
+
     private static OutboxMessage message(String id) {
         return new OutboxMessage(
                 id,

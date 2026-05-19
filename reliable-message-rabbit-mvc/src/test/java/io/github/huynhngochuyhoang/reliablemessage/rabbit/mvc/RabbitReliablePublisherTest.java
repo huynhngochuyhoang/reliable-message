@@ -8,6 +8,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitOperations;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
@@ -21,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 
 class RabbitReliablePublisherTest {
 
@@ -65,6 +67,31 @@ class RabbitReliablePublisherTest {
         assertEquals("correlation-1", envelope.correlationId());
         assertEquals("correlation-1", message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.CORRELATION_ID));
         assertNotNull(message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.MESSAGE_ID));
+    }
+
+    @Test
+    void skipsPublisherConfirmWhenConnectionFactoryDoesNotEnableConfirms() {
+        RabbitTemplate rabbitTemplate = org.mockito.Mockito.mock(RabbitTemplate.class);
+        CachingConnectionFactory connectionFactory = org.mockito.Mockito.mock(CachingConnectionFactory.class);
+        when(connectionFactory.getPublisherConfirmType()).thenReturn(CachingConnectionFactory.ConfirmType.NONE);
+        when(rabbitTemplate.getConnectionFactory()).thenReturn(connectionFactory);
+
+        RabbitReliableMessageProperties properties = new RabbitReliableMessageProperties();
+        properties.getRabbit().setExchange("app.events");
+        properties.getRabbit().setPublisherConfirm(true);
+
+        RabbitReliablePublisher publisher = new RabbitReliablePublisher(
+                rabbitTemplate,
+                new JacksonReliableMessageSerializer(new ObjectMapper()),
+                properties,
+                Clock.fixed(Instant.parse("2026-05-17T00:00:00Z"), ZoneOffset.UTC),
+                new SimpleMeterRegistry()
+        );
+
+        publisher.publish("order.created", new OrderCreated("order-1"), PublishOptions.empty());
+
+        verify(rabbitTemplate).send(eq("app.events"), eq("order.created"), any(Message.class));
+        verify(rabbitTemplate, never()).invoke(any(RabbitOperations.OperationsCallback.class));
     }
 
     record OrderCreated(String orderId) {
