@@ -69,6 +69,7 @@ class JdbcOutboxStoreTest {
     void marksPublishedRows() {
         TestStore testStore = store();
         testStore.store.save(message("event-1"));
+        assertEquals(1, testStore.store.findPending(10).size());
 
         testStore.store.markPublished("event-1");
 
@@ -81,6 +82,7 @@ class JdbcOutboxStoreTest {
     void markFailedDoesNotOverwritePublishedRows() {
         TestStore testStore = store();
         testStore.store.save(message("event-1"));
+        assertEquals(1, testStore.store.findPending(10).size());
 
         testStore.store.markPublished("event-1");
         testStore.store.markFailed("event-1", new IllegalStateException("late failure"), NOW.plusSeconds(30));
