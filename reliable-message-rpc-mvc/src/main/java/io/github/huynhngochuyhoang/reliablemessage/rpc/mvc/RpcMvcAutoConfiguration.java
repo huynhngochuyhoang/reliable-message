@@ -3,14 +3,15 @@ package io.github.huynhngochuyhoang.reliablemessage.rpc.mvc;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcExceptionClassifier;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.client.RestClient;
 
 @AutoConfiguration
@@ -26,21 +27,18 @@ public class RpcMvcAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnBean(MeterRegistry.class)
     @ConditionalOnMissingBean
-    RpcMetrics rpcMvcMetrics(MeterRegistry meterRegistry) {
-        return new RpcMetrics(meterRegistry, "rpc_client");
+    RpcMetrics rpcMvcMetrics(ObjectProvider<MeterRegistry> meterRegistryProvider) {
+        return new RpcMetrics(meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new), "rpc_client");
     }
 
     @Bean
-    @ConditionalOnBean(RpcMetrics.class)
     @ConditionalOnMissingBean
     RpcRestClientInterceptor rpcRestClientInterceptor(RpcMetrics rpcMvcMetrics, RpcExceptionClassifier rpcExceptionClassifier) {
         return new RpcRestClientInterceptor(rpcMvcMetrics, rpcExceptionClassifier);
     }
 
     @Bean
-    @ConditionalOnBean(RpcRestClientInterceptor.class)
     RestClientCustomizer rpcRestClientCustomizer(RpcRestClientInterceptor interceptor) {
         return builder -> builder.requestInterceptor(interceptor);
     }

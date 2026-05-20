@@ -10,11 +10,12 @@ import io.github.huynhngochuyhoang.reliablemessage.audit.NoopReactiveMessageAudi
 import io.github.huynhngochuyhoang.reliablemessage.audit.ReactiveMessageAuditSink;
 import io.github.huynhngochuyhoang.reliablemessage.audit.Sha256MessageAuditHasher;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 
 @AutoConfiguration
@@ -53,7 +54,6 @@ public class ReactiveMessageAuditAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnBean(MeterRegistry.class)
     @ConditionalOnProperty(prefix = "message.reliability.audit", name = "enabled", havingValue = "true")
     ReactiveMessageAuditRecorder reactiveMessageAuditRecorder(
             MessageAuditCapturePolicy capturePolicy,
@@ -61,9 +61,17 @@ public class ReactiveMessageAuditAutoConfiguration {
             MessageAuditHasher hasher,
             MessageAuditSigner signer,
             ReactiveMessageAuditSink sink,
-            MeterRegistry meterRegistry,
+            ObjectProvider<MeterRegistry> meterRegistryProvider,
             ReactiveMessageAuditProperties properties
     ) {
-        return new ReactiveMessageAuditRecorder(capturePolicy, sanitizer, hasher, signer, sink, meterRegistry, properties);
+        return new ReactiveMessageAuditRecorder(
+                capturePolicy,
+                sanitizer,
+                hasher,
+                signer,
+                sink,
+                meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new),
+                properties
+        );
     }
 }

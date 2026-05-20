@@ -5,13 +5,14 @@ import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcMetrics;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcRetryPolicy;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcTimeoutPolicy;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.reactive.function.client.WebClientCustomizer;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -28,21 +29,18 @@ public class RpcWebFluxAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnBean(MeterRegistry.class)
     @ConditionalOnMissingBean(name = "reactiveRpcMetrics")
-    RpcMetrics reactiveRpcMetrics(MeterRegistry meterRegistry) {
-        return new RpcMetrics(meterRegistry, "rpc_reactive");
+    RpcMetrics reactiveRpcMetrics(ObjectProvider<MeterRegistry> meterRegistryProvider) {
+        return new RpcMetrics(meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new), "rpc_reactive");
     }
 
     @Bean
-    @ConditionalOnBean(RpcMetrics.class)
     @ConditionalOnMissingBean
     RpcWebClientExchangeFilter rpcWebClientExchangeFilter(RpcMetrics reactiveRpcMetrics, RpcExceptionClassifier reactiveRpcExceptionClassifier) {
         return new RpcWebClientExchangeFilter(reactiveRpcMetrics, reactiveRpcExceptionClassifier);
     }
 
     @Bean
-    @ConditionalOnBean(RpcMetrics.class)
     @ConditionalOnMissingBean
     ReactiveRpcOperator reactiveRpcOperator(
             RpcWebFluxProperties properties,
@@ -58,7 +56,6 @@ public class RpcWebFluxAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnBean(RpcWebClientExchangeFilter.class)
     WebClientCustomizer rpcWebClientCustomizer(RpcWebClientExchangeFilter filter) {
         return builder -> builder.filter(filter);
     }
