@@ -1,9 +1,12 @@
 package io.github.huynhngochuyhoang.reliablemessage.rpc.mvc;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+@ConfigurationProperties(prefix = "message.reliability.rpc.mvc")
 public class RpcMvcProperties {
 
     private boolean enabled = true;

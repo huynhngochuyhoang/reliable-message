@@ -50,7 +50,11 @@ public class RpcWebClientExchangeFilter implements ExchangeFilterFunction {
 
     private static ClientRequest withHeaders(ClientRequest request, Map<String, String> headers) {
         return ClientRequest.from(request)
-                .headers(httpHeaders -> headers.forEach(httpHeaders::set))
+                .headers(httpHeaders -> headers.forEach((name, value) -> {
+                    if (!httpHeaders.containsKey(name)) {
+                        httpHeaders.set(name, value);
+                    }
+                }))
                 .build();
     }
 }

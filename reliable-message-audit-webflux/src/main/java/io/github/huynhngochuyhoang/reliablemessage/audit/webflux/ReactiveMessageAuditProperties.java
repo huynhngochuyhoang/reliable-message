@@ -1,5 +1,8 @@
 package io.github.huynhngochuyhoang.reliablemessage.audit.webflux;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "message.reliability.audit")
 public class ReactiveMessageAuditProperties {
 
     private boolean enabled = false;

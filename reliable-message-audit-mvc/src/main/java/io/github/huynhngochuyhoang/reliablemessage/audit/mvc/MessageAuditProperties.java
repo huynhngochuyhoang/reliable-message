@@ -1,5 +1,8 @@
 package io.github.huynhngochuyhoang.reliablemessage.audit.mvc;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "message.reliability.audit")
 public class MessageAuditProperties {
 
     private boolean enabled = false;

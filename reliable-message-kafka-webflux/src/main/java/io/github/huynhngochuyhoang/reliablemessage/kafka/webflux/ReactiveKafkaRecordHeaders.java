@@ -19,6 +19,9 @@ final class ReactiveKafkaRecordHeaders {
 
     static String value(Headers headers, String name) {
         Header header = headers.lastHeader(name);
-        return header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
+        if (header == null || header.value() == null) {
+            return null;
+        }
+        return new String(header.value(), StandardCharsets.UTF_8);
     }
 }

@@ -35,10 +35,21 @@ public class ReactiveRpcOperator {
         if (retryPolicy.maxAttempts() <= 1) {
             return result;
         }
-        Duration firstDelay = retryPolicy.delayForAttempt(1);
-        Retry retry = Retry.backoff(retryPolicy.maxAttempts() - 1L, firstDelay.isZero() ? Duration.ofMillis(1) : firstDelay)
-                .filter(exceptionClassifier::retryable)
-                .doBeforeRetry(signal -> metrics.retry("webflux", "http"));
+        Retry retry = Retry.from(signals -> signals.concatMap(signal -> {
+            Throwable failure = signal.failure();
+            if (!exceptionClassifier.retryable(failure)) {
+                return Mono.error(failure);
+            }
+            long retries = signal.totalRetries();
+            if (retries >= retryPolicy.maxAttempts() - 1L) {
+                return Mono.error(failure);
+            }
+            int nextAttempt = (int) retries + 1;
+            Duration delay = retryPolicy.delayForAttempt(nextAttempt);
+            Duration effectiveDelay = delay.isNegative() ? Duration.ZERO : delay;
+            metrics.retry("webflux", "http");
+            return effectiveDelay.isZero() ? Mono.empty() : Mono.delay(effectiveDelay).then();
+        }));
         return result.retryWhen(retry);
     }
 }

@@ -1,9 +1,12 @@
 package io.github.huynhngochuyhoang.reliablemessage.rpc.webflux;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+@ConfigurationProperties(prefix = "message.reliability.rpc.webflux")
 public class RpcWebFluxProperties {
 
     private boolean enabled = true;

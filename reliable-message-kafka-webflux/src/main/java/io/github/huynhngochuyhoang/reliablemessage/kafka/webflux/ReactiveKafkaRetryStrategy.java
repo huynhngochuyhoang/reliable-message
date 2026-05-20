@@ -77,7 +77,14 @@ public class ReactiveKafkaRetryStrategy {
 
     static int retryCount(ReactiveKafkaReceivedRecord record) {
         String value = ReactiveKafkaRecordHeaders.value(record.headers(), ReliableMessageHeaders.RETRY_COUNT);
-        return value == null || value.isBlank() ? 0 : Integer.parseInt(value);
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     static ProducerRecord<String, byte[]> copyForRepublish(

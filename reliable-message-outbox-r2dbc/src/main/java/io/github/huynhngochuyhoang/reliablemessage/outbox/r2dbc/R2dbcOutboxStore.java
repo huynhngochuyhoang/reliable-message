@@ -121,7 +121,7 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
                 .all()
                 .concatMap(id -> claim(id, now)
                         .filter(Boolean::booleanValue)
-                        .flatMap(ignored -> findById(id)));
+                        .flatMap(ignored -> findByIdProcessing(id)));
     }
 
     @Override
@@ -180,14 +180,15 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
                 .map(updated -> updated == 1);
     }
 
-    private Mono<OutboxMessage> findById(String id) {
+    private Mono<OutboxMessage> findByIdProcessing(String id) {
         return databaseClient.sql("""
                         select id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
                                status, retry_count, next_retry_at, created_at, published_at, last_error
                         from message_outbox
-                        where id = :id
+                        where id = :id and status = :processing
                         """)
                 .bind("id", id)
+                .bind("processing", MessageStatus.PROCESSING.name())
                 .map(this::mapRow)
                 .one();
     }

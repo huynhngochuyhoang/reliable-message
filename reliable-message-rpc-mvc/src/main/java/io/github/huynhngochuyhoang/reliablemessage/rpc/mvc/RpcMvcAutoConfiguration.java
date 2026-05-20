@@ -4,6 +4,7 @@ import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcExceptionClassifier;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -25,6 +26,7 @@ public class RpcMvcAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnBean(MeterRegistry.class)
     @ConditionalOnMissingBean
     RpcMetrics rpcMvcMetrics(MeterRegistry meterRegistry) {
         return new RpcMetrics(meterRegistry, "rpc_client");
