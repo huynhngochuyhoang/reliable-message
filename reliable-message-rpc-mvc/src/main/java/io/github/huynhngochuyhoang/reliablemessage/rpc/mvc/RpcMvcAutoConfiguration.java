@@ -2,6 +2,8 @@ package io.github.huynhngochuyhoang.reliablemessage.rpc.mvc;
 
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcExceptionClassifier;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcMetrics;
+import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcRetryPolicy;
+import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcTimeoutPolicy;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -34,8 +36,25 @@ public class RpcMvcAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RpcRestClientInterceptor rpcRestClientInterceptor(RpcMetrics rpcMvcMetrics, RpcExceptionClassifier rpcExceptionClassifier) {
-        return new RpcRestClientInterceptor(rpcMvcMetrics, rpcExceptionClassifier);
+    RpcRetryPolicy rpcMvcRetryPolicy(RpcMvcProperties properties) {
+        return new RpcRetryPolicy(properties.getMaxAttempts(), properties.getBackoff());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RpcTimeoutPolicy rpcMvcTimeoutPolicy(RpcMvcProperties properties) {
+        return new RpcTimeoutPolicy(properties.getRequestTimeout());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RpcRestClientInterceptor rpcRestClientInterceptor(
+            RpcMetrics rpcMvcMetrics,
+            RpcExceptionClassifier rpcExceptionClassifier,
+            RpcRetryPolicy rpcMvcRetryPolicy,
+            RpcTimeoutPolicy rpcMvcTimeoutPolicy
+    ) {
+        return new RpcRestClientInterceptor(rpcMvcMetrics, rpcExceptionClassifier, rpcMvcRetryPolicy, rpcMvcTimeoutPolicy);
     }
 
     @Bean
