@@ -17,3 +17,4 @@ Tracking docs for the roadmap in `reliable-message-design.md`.
 11. [WebFlux Rabbit Research](milestones/11-webflux-rabbit-research.md)
 12. [RPC Extension](milestones/12-rpc-extension.md)
 13. [Audit Extension](milestones/13-audit-extension.md)
+14. [RabbitMQ WebFlux Blocking Bridge](milestones/14-rabbit-webflux-blocking-bridge.md)

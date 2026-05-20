@@ -13,6 +13,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -54,12 +56,30 @@ class ReactiveRedisIdempotencyStoreTest {
         when(redis.values.setIfAbsent("test:event-1", "PROCESSING|1779062700000|", Duration.ofMinutes(5)))
                 .thenReturn(Mono.just(false));
         when(redis.values.get("test:event-1")).thenReturn(Mono.just("FAILED|1779062700000|boom"));
+        when(redis.values.setIfAbsent(eq("test:event-1:restart-lock"), anyString(), eq(Duration.ofSeconds(10))))
+                .thenReturn(Mono.just(true));
+        when(redis.values.get("test:event-1:restart-lock")).thenReturn(Mono.empty());
         when(redis.values.set("test:event-1", "PROCESSING|1779062700000|", Duration.ofMinutes(5)))
                 .thenReturn(Mono.just(true));
         ReactiveRedisIdempotencyStore store = new ReactiveRedisIdempotencyStore(redis.template, "test:", CLOCK);
 
         StepVerifier.create(store.tryStart("event-1", Duration.ofMinutes(5)))
                 .expectNextMatches(result -> result.started() && result.state() == IdempotencyState.PROCESSING)
+                .verifyComplete();
+    }
+
+    @Test
+    void malformedStateReturnsDuplicateWhenRestartLockIsHeld() {
+        RedisMocks redis = redis();
+        when(redis.values.setIfAbsent("test:event-1", "PROCESSING|1779062700000|", Duration.ofMinutes(5)))
+                .thenReturn(Mono.just(false));
+        when(redis.values.get("test:event-1")).thenReturn(Mono.just("not-a-valid-state"));
+        when(redis.values.setIfAbsent(eq("test:event-1:restart-lock"), anyString(), eq(Duration.ofSeconds(10))))
+                .thenReturn(Mono.just(false));
+        ReactiveRedisIdempotencyStore store = new ReactiveRedisIdempotencyStore(redis.template, "test:", CLOCK);
+
+        StepVerifier.create(store.tryStart("event-1", Duration.ofMinutes(5)))
+                .expectNextMatches(result -> !result.started() && result.state() == IdempotencyState.PROCESSING)
                 .verifyComplete();
     }
 
