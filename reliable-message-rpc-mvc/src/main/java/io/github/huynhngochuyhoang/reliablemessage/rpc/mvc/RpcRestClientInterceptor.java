@@ -1,11 +1,6 @@
 package io.github.huynhngochuyhoang.reliablemessage.rpc.mvc;
 
-import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcContextHolder;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcExceptionClassifier;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcHeaders;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcMetrics;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcRetryPolicy;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcTimeoutPolicy;
+import io.github.huynhngochuyhoang.reliablemessage.rpc.*;
 import io.micrometer.core.instrument.Timer;
 import org.springframework.http.HttpRequest;
 import org.springframework.http.client.ClientHttpRequestExecution;
@@ -59,7 +54,7 @@ public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
                 if (exceptionClassifier.timeout(error)) {
                     metrics.timeout("mvc", "http");
                 }
-                if (attempt >= attempts || exceptionClassifier.timeout(error) || !exceptionClassifier.retryable(error)) {
+                if (attempt >= attempts || !exceptionClassifier.retryable(error)) {
                     metrics.failure("mvc", "http", error.getClass().getSimpleName());
                     metrics.duration(sample, "mvc", "http", "failed");
                     throw error;
@@ -86,7 +81,7 @@ public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
         try {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException timeoutException) {
-            future.cancel(true);
+            waitForTimedOutAttempt(future);
             throw new RuntimeException(timeoutException);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
@@ -100,6 +95,20 @@ public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
                 throw runtime;
             }
             throw new IOException("RPC execution failed", cause);
+        }
+    }
+
+    private void waitForTimedOutAttempt(CompletableFuture<ClientHttpResponse> future) throws IOException {
+        try {
+            ClientHttpResponse lateResponse = future.get();
+            if (lateResponse != null) {
+                lateResponse.close();
+            }
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for timed out RPC response", interruptedException);
+        } catch (ExecutionException ignored) {
+            // The caller already observes the timeout; this only waits until the attempt is no longer in flight.
         }
     }
 

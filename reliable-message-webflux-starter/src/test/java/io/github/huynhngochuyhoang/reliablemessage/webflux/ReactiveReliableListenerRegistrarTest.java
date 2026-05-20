@@ -10,12 +10,11 @@ import org.springframework.context.annotation.Configuration;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.*;
 
 class ReactiveReliableListenerRegistrarTest {
 
@@ -62,6 +61,22 @@ class ReactiveReliableListenerRegistrarTest {
                 });
     }
 
+    @Test
+    void invokesPrivateHandlerMethod() throws Exception {
+        PrivateListener listener = new PrivateListener();
+        Method method = PrivateListener.class.getDeclaredMethod("handle", ReliableMessage.class);
+        ReactiveReliableListenerEndpoint endpoint = new ReactiveReliableListenerEndpoint(
+                "privateListener",
+                listener,
+                method,
+                "order.created",
+                OrderCreated.class
+        );
+
+        StepVerifier.create(new ReactiveReliableListenerMethodInvoker().invoke(endpoint, message()))
+                .verifyComplete();
+    }
+
     @Configuration(proxyBeanMethods = false)
     static class ValidListenerConfig {
 
@@ -84,6 +99,14 @@ class ReactiveReliableListenerRegistrarTest {
 
         @ReactiveReliableListener("order.created")
         Mono<Void> handle(ReliableMessage<OrderCreated> message) {
+            return Mono.empty();
+        }
+    }
+
+    static final class PrivateListener {
+
+        @ReactiveReliableListener("order.created")
+        private Mono<Void> handle(ReliableMessage<OrderCreated> message) {
             return Mono.empty();
         }
     }

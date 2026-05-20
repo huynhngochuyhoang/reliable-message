@@ -9,6 +9,7 @@ public class ReactiveReliableListenerMethodInvoker {
 
     public Mono<Void> invoke(ReactiveReliableListenerEndpoint endpoint, ReliableMessage<?> message) {
         try {
+            endpoint.method().setAccessible(true);
             Object result = endpoint.method().invoke(endpoint.bean(), message);
             if (result == null) {
                 return Mono.error(new IllegalStateException("@ReactiveReliableListener returned null Mono: " + endpoint.method()));

@@ -1,13 +1,14 @@
 package io.github.huynhngochuyhoang.reliablemessage.kafka.webflux;
 
 import reactor.core.Disposable;
-import reactor.kafka.receiver.KafkaReceiver;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import reactor.kafka.receiver.KafkaReceiver;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ReactiveKafkaReliableListenerContainer {
 
@@ -38,7 +39,7 @@ public class ReactiveKafkaReliableListenerContainer {
         }
         Semaphore concurrencyLimiter = new Semaphore(Math.max(1, maxConcurrency));
         subscription = kafkaReceiver.receive()
-                .limitRate(prefetch)
+                .limitRate(Math.max(1, prefetch))
                 .groupBy(record -> record.receiverOffset().topicPartition())
                 .flatMap(partitionRecords -> partitionRecords
                         .concatMap(record -> withConcurrencyLimit(
@@ -50,11 +51,25 @@ public class ReactiveKafkaReliableListenerContainer {
                 .subscribe();
     }
 
-    private static Mono<Void> withConcurrencyLimit(Semaphore limiter, Mono<Void> action) {
-        return Mono.fromRunnable(limiter::acquireUninterruptibly)
+    static Mono<Void> withConcurrencyLimit(Semaphore limiter, Mono<Void> action) {
+        AtomicBoolean acquired = new AtomicBoolean(false);
+        return Mono.fromCallable(() -> {
+                    try {
+                        limiter.acquire();
+                        acquired.set(true);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("Interrupted while acquiring listener concurrency permit", interrupted);
+                    }
+                    return true;
+                })
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(action)
-                .doFinally(signal -> limiter.release());
+                .doFinally(signal -> {
+                    if (acquired.get()) {
+                        limiter.release();
+                    }
+                });
     }
 
     public void stop() {
