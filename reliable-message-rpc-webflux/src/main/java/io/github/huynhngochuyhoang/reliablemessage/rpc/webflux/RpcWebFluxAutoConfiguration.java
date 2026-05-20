@@ -29,7 +29,7 @@ public class RpcWebFluxAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(name = "reactiveRpcMetrics")
+    @ConditionalOnMissingBean(RpcMetrics.class)
     RpcMetrics reactiveRpcMetrics(ObjectProvider<MeterRegistry> meterRegistryProvider) {
         return new RpcMetrics(meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new), "rpc_reactive");
     }

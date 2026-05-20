@@ -166,13 +166,13 @@ public class JdbcOutboxStore implements OutboxStore {
         jdbcTemplate.update("""
                         update message_outbox
                         set status = ?, retry_count = retry_count + 1, next_retry_at = ?, last_error = ?, processing_started_at = null
-                        where id = ? and status <> ?
+                        where id = ? and status = ?
                         """,
                 MessageStatus.FAILED.name(),
                 timestamp(nextRetryAt),
                 error == null ? null : error.getMessage(),
                 id,
-                MessageStatus.PUBLISHED.name()
+                MessageStatus.PROCESSING.name()
         );
     }
 

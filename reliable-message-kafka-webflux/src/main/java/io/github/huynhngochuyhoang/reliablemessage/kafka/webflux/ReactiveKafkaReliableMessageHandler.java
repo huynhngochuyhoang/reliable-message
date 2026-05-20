@@ -65,7 +65,9 @@ public class ReactiveKafkaReliableMessageHandler {
         return tryStart(message)
                 .flatMap(startResult -> {
                     if (!startResult.started()) {
-                        return record.receiverOffset().commit();
+                        return startResult.completed()
+                                ? record.receiverOffset().commit()
+                                : Mono.empty();
                     }
                     idempotencyStarted.set(isIdempotencyEnabled(message));
                     return invoker.invoke(message)
@@ -110,7 +112,13 @@ public class ReactiveKafkaReliableMessageHandler {
         if (retryNotBefore == null || retryNotBefore.isBlank()) {
             return Mono.empty();
         }
-        long delayMillis = Long.parseLong(retryNotBefore) - Instant.now().toEpochMilli();
+        long retryNotBeforeEpochMillis;
+        try {
+            retryNotBeforeEpochMillis = Long.parseLong(retryNotBefore);
+        } catch (NumberFormatException ex) {
+            return Mono.empty();
+        }
+        long delayMillis = retryNotBeforeEpochMillis - Instant.now().toEpochMilli();
         if (delayMillis <= 0) {
             return Mono.empty();
         }
