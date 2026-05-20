@@ -51,8 +51,7 @@ public class ReactiveKafkaReliableMessageHandler {
                             : Mono.empty();
                     return markFailed.onErrorResume(markFailedError -> Mono.empty())
                             .then(routeFailure(record, endpoint, error))
-                            .then(record.receiverOffset().commit())
-                            .then(Mono.error(error));
+                            .then(record.receiverOffset().commit());
                 });
     }
 

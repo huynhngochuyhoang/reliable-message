@@ -8,6 +8,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.stream.Collectors;
 
 public final class Sha256MessageAuditHasher implements MessageAuditHasher {
@@ -55,6 +57,29 @@ public final class Sha256MessageAuditHasher implements MessageAuditHasher {
             List<String> items = collection.stream().map(Sha256MessageAuditHasher::stableValue).collect(Collectors.toList());
             return items.toString();
         }
-        return value.getClass().getName();
+        return stableObjectValue(value);
     }
+    private static String stableObjectValue(Object value) {
+        TreeMap<String, String> fields = new TreeMap<>();
+        Class<?> type = value.getClass();
+        while (type != null && type != Object.class) {
+            for (Field field : type.getDeclaredFields()) {
+                if (Modifier.isStatic(field.getModifiers())) {
+                    continue;
+                }
+                field.setAccessible(true);
+                try {
+                    fields.putIfAbsent(field.getName(), stableValue(field.get(value)));
+                } catch (IllegalAccessException ignored) {
+                    // ignore inaccessible fields
+                }
+            }
+            type = type.getSuperclass();
+        }
+        if (fields.isEmpty()) {
+            return value.getClass().getName() + ":" + String.valueOf(value);
+        }
+        return value.getClass().getName() + fields;
+    }
+
 }

@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.reactive.function.client.WebClientCustomizer;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -29,14 +30,14 @@ public class RpcWebFluxAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(RpcMetrics.class)
+    @ConditionalOnMissingBean(name = "reactiveRpcMetrics")
     RpcMetrics reactiveRpcMetrics(ObjectProvider<MeterRegistry> meterRegistryProvider) {
         return new RpcMetrics(meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new), "rpc_reactive");
     }
 
     @Bean
     @ConditionalOnMissingBean
-    RpcWebClientExchangeFilter rpcWebClientExchangeFilter(RpcMetrics reactiveRpcMetrics, RpcExceptionClassifier reactiveRpcExceptionClassifier) {
+    RpcWebClientExchangeFilter rpcWebClientExchangeFilter(@Qualifier("reactiveRpcMetrics") RpcMetrics reactiveRpcMetrics, RpcExceptionClassifier reactiveRpcExceptionClassifier) {
         return new RpcWebClientExchangeFilter(reactiveRpcMetrics, reactiveRpcExceptionClassifier);
     }
 
@@ -45,7 +46,7 @@ public class RpcWebFluxAutoConfiguration {
     ReactiveRpcOperator reactiveRpcOperator(
             RpcWebFluxProperties properties,
             RpcExceptionClassifier reactiveRpcExceptionClassifier,
-            RpcMetrics reactiveRpcMetrics
+            @Qualifier("reactiveRpcMetrics") RpcMetrics reactiveRpcMetrics
     ) {
         return new ReactiveRpcOperator(
                 new RpcRetryPolicy(properties.getMaxAttempts(), properties.getBackoff()),
