@@ -81,7 +81,7 @@ public class ReactiveKafkaRetryStrategy {
             return 0;
         }
         try {
-            return Integer.parseInt(value);
+            return Math.max(0, Integer.parseInt(value));
         } catch (NumberFormatException ignored) {
             return 0;
         }

@@ -17,7 +17,6 @@ import java.util.UUID;
 public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
 
     private static final String DEFAULT_PREFIX = "reliable-message:idempotency:";
-    private static final Duration FALLBACK_TTL = Duration.ofHours(24);
     private static final String RESTART_LOCK_SUFFIX = ":restart-lock";
     private static final Duration RESTART_LOCK_TTL = Duration.ofSeconds(10);
     private static final RedisScript<Long> COMPARE_AND_DELETE_SCRIPT = RedisScript.of(
@@ -161,7 +160,7 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
             return null;
         }
         if (ttl.isNegative()) {
-            return FALLBACK_TTL;
+            return null;
         }
         return ttl;
     }

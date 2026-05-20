@@ -33,8 +33,12 @@ public class ReactiveKafkaReliableListenerContainer {
         }
         subscription = kafkaReceiver.receive()
                 .limitRate(prefetch)
-                .flatMap(record -> handler.handle(new ReactorKafkaReceivedRecord(record), endpoint)
-                        .onErrorResume(error -> Mono.empty()), maxConcurrency, prefetch)
+                .groupBy(record -> record.receiverOffset().topicPartition())
+                .flatMap(partitionRecords -> partitionRecords
+                                .concatMap(record -> handler.handle(new ReactorKafkaReceivedRecord(record), endpoint)
+                                        .onErrorResume(error -> Mono.empty())),
+                        maxConcurrency,
+                        prefetch)
                 .subscribe();
     }
 

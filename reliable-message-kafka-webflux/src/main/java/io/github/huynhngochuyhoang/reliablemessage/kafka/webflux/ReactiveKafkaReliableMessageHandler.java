@@ -48,7 +48,7 @@ public class ReactiveKafkaReliableMessageHandler {
                     Mono<Void> markFailed = idempotencyStarted.get() && message != null
                             ? idempotencyStore.markFailed(message.idempotencyKey(), error)
                             : Mono.empty();
-                    return markFailed
+                    return markFailed.onErrorResume(markFailedError -> Mono.empty())
                             .then(routeFailure(record, endpoint, error))
                             .then(record.receiverOffset().commit())
                             .then(Mono.error(error));
