@@ -3,7 +3,7 @@ package io.github.huynhngochuyhoang.reliablemessage.idempotency.r2dbc;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Mono;
 
@@ -64,7 +64,7 @@ public class R2dbcIdempotencyStore implements ReactiveIdempotencyStore {
                 .fetch()
                 .rowsUpdated()
                 .thenReturn(IdempotencyStartResult.startAccepted())
-                .onErrorResume(DuplicateKeyException.class, ignored -> tryRestartExisting(key, now, expiresAt));
+                .onErrorResume(DataIntegrityViolationException.class, ignored -> tryRestartExisting(key, now, expiresAt));
     }
 
     @Override
