@@ -6,6 +6,7 @@ import org.apache.kafka.common.header.Header;
 import reactor.core.publisher.Mono;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
+import reactor.kafka.sender.SenderResult;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -44,7 +45,15 @@ public class ReactiveKafkaRetryStrategy {
         }
         return kafkaSender.send(Mono.just(SenderRecord.create(record, route)))
                 .next()
-                .then();
+                .flatMap(this::toCompletion);
+    }
+
+    private Mono<Void> toCompletion(SenderResult<String> result) {
+        Exception exception = result.exception();
+        if (exception != null) {
+            return Mono.error(exception);
+        }
+        return Mono.empty();
     }
 
     private String routeName(int retryCount) {

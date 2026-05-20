@@ -10,6 +10,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import reactor.core.publisher.Mono;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
+import reactor.kafka.sender.SenderResult;
 
 import java.time.Clock;
 import java.util.LinkedHashMap;
@@ -51,8 +52,16 @@ public class ReactiveKafkaReliablePublisher implements ReactiveReliablePublisher
             reliableMessage.headers().forEach((name, value) -> ReactiveKafkaRecordHeaders.put(record.headers(), name, value));
             return kafkaSender.send(Mono.just(SenderRecord.create(record, reliableMessage.messageId())))
                     .next()
-                    .then();
+                    .flatMap(this::toCompletion);
         });
+    }
+
+    private Mono<Void> toCompletion(SenderResult<String> result) {
+        Exception exception = result.exception();
+        if (exception != null) {
+            return Mono.error(exception);
+        }
+        return Mono.empty();
     }
 
     private ReliableMessage<Object> toReliableMessage(String eventName, Object payload, PublishOptions options) {

@@ -5,6 +5,7 @@ import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import reactor.core.publisher.Mono;
 
 import java.time.Clock;
@@ -16,6 +17,26 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
 
     private static final String DEFAULT_PREFIX = "reliable-message:idempotency:";
     private static final Duration FALLBACK_TTL = Duration.ofHours(24);
+    private static final DefaultRedisScript<Long> RESTART_IF_RETRYABLE_SCRIPT = new DefaultRedisScript<>(
+            "local current = redis.call('GET', KEYS[1])\n"
+                    + "if not current then\n"
+                    + "  redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])\n"
+                    + "  return 1\n"
+                    + "end\n"
+                    + "local sep1 = string.find(current, '|')\n"
+                    + "if not sep1 then return 0 end\n"
+                    + "local sep2 = string.find(current, '|', sep1 + 1)\n"
+                    + "if not sep2 then return 0 end\n"
+                    + "local state = string.sub(current, 1, sep1 - 1)\n"
+                    + "local expiresAt = tonumber(string.sub(current, sep1 + 1, sep2 - 1))\n"
+                    + "if not expiresAt then return 0 end\n"
+                    + "if state == 'FAILED' or expiresAt <= tonumber(ARGV[3]) then\n"
+                    + "  redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])\n"
+                    + "  return 1\n"
+                    + "end\n"
+                    + "return 0",
+            Long.class
+    );
 
     private final ReactiveStringRedisTemplate redisTemplate;
     private final String keyPrefix;
@@ -75,11 +96,28 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
                             && storedState.state() != IdempotencyState.FAILED) {
                         return Mono.just(IdempotencyStartResult.duplicate(storedState.state()));
                     }
-                    return values.set(redisKey, processingState, ttl)
-                            .thenReturn(IdempotencyStartResult.startAccepted());
+                    return tryRestartAtomically(redisKey, processingState, ttl, now)
+                            .flatMap(restarted -> Boolean.TRUE.equals(restarted)
+                                    ? Mono.just(IdempotencyStartResult.startAccepted())
+                                    : Mono.just(IdempotencyStartResult.duplicate(storedState.state())));
                 })
-                .switchIfEmpty(Mono.defer(() -> values.set(redisKey, processingState, ttl)
-                        .thenReturn(IdempotencyStartResult.startAccepted())));
+                .switchIfEmpty(Mono.defer(() -> tryRestartAtomically(redisKey, processingState, ttl, now)
+                        .map(restarted -> Boolean.TRUE.equals(restarted)
+                                ? IdempotencyStartResult.startAccepted()
+                                : IdempotencyStartResult.duplicate(IdempotencyState.PROCESSING))));
+    }
+
+    private Mono<Boolean> tryRestartAtomically(String redisKey, String processingState, Duration ttl, Instant now) {
+        return redisTemplate.execute(
+                        RESTART_IF_RETRYABLE_SCRIPT,
+                        java.util.Collections.singletonList(redisKey),
+                        processingState,
+                        String.valueOf(ttl.toMillis()),
+                        String.valueOf(now.toEpochMilli())
+                )
+                .next()
+                .map(result -> result != null && result == 1L)
+                .defaultIfEmpty(false);
     }
 
     private Mono<Void> updateState(String key, IdempotencyState state, String errorMessage) {

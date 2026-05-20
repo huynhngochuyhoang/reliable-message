@@ -125,7 +125,7 @@ public class RabbitReliablePublisher implements ReliablePublisher {
         if (!(rabbitTemplate.getConnectionFactory() instanceof CachingConnectionFactory cachingConnectionFactory)) {
             return false;
         }
-        return cachingConnectionFactory.isPublisherConfirms();
+        return cachingConnectionFactory.isPublisherConfirms() || cachingConnectionFactory.isSimplePublisherConfirms();
     }
 
     private static void putIfPresent(Map<String, String> headers, String name, String value) {

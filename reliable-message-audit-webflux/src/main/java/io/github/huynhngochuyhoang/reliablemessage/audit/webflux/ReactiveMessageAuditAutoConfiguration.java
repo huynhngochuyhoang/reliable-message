@@ -11,7 +11,9 @@ import io.github.huynhngochuyhoang.reliablemessage.audit.ReactiveMessageAuditSin
 import io.github.huynhngochuyhoang.reliablemessage.audit.Sha256MessageAuditHasher;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 
@@ -51,6 +53,8 @@ public class ReactiveMessageAuditAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean(MeterRegistry.class)
+    @ConditionalOnProperty(prefix = "message.reliability.audit", name = "enabled", havingValue = "true")
     ReactiveMessageAuditRecorder reactiveMessageAuditRecorder(
             MessageAuditCapturePolicy capturePolicy,
             MessageAuditSanitizer sanitizer,

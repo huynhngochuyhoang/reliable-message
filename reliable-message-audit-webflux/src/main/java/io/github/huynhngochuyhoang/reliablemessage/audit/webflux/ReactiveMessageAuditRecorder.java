@@ -51,17 +51,8 @@ public class ReactiveMessageAuditRecorder {
             }
 
             Timer.Sample sample = Timer.start(meterRegistry);
-            MessageAuditRecord sanitized = sanitize(record, context);
-            String signature = signer.sign(sanitized);
-            MessageAuditRecord finalRecord = sanitized.withCapture(
-                    sanitized.headers(),
-                    sanitized.payload(),
-                    sanitized.rawBody(),
-                    sanitized.payloadHash(),
-                    sanitized.headersHash(),
-                    signature
-            );
-            return sink.record(finalRecord)
+            return Mono.fromSupplier(() -> prepareRecord(record, context))
+                    .flatMap(sink::record)
                     .doOnSuccess(ignored -> {
                         increment("message_audit_reactive_records_total", "recorded");
                         sample.stop(timer("recorded"));
@@ -72,6 +63,19 @@ public class ReactiveMessageAuditRecorder {
                     })
                     .onErrorResume(error -> "fail-business".equals(properties.getOnFailure()) ? Mono.error(error) : Mono.empty());
         });
+    }
+
+    private MessageAuditRecord prepareRecord(MessageAuditRecord record, MessageAuditContext context) {
+        MessageAuditRecord sanitized = sanitize(record, context);
+        String signature = signer.sign(sanitized);
+        return sanitized.withCapture(
+                sanitized.headers(),
+                sanitized.payload(),
+                sanitized.rawBody(),
+                sanitized.payloadHash(),
+                sanitized.headersHash(),
+                signature
+        );
     }
 
     private MessageAuditRecord sanitize(MessageAuditRecord record, MessageAuditContext context) {
