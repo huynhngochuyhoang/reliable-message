@@ -1,22 +1,19 @@
 package io.github.huynhngochuyhoang.reliablemessage.audit;
 
+import java.lang.reflect.Array;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Collection;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public final class Sha256MessageAuditHasher implements MessageAuditHasher {
 
     @Override
     public String hashPayload(Object payload) {
-        return payload == null ? null : hash(stableValue(payload).getBytes(StandardCharsets.UTF_8));
+        return payload == null ? null : hash(stableValue(payload, activeObjects()).getBytes(StandardCharsets.UTF_8));
     }
 
     @Override
@@ -24,7 +21,7 @@ public final class Sha256MessageAuditHasher implements MessageAuditHasher {
         if (headers == null || headers.isEmpty()) {
             return null;
         }
-        return hash(stableValue(headers).getBytes(StandardCharsets.UTF_8));
+        return hash(stableValue(headers, activeObjects()).getBytes(StandardCharsets.UTF_8));
     }
 
     @Override
@@ -41,45 +38,101 @@ public final class Sha256MessageAuditHasher implements MessageAuditHasher {
         }
     }
 
-    private static String stableValue(Object value) {
+    private static Set<Object> activeObjects() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
+    }
+
+    private static String stableValue(Object value, Set<Object> activeObjects) {
+        if (value == null) {
+            return "null";
+        }
         if (value instanceof byte[] bytes) {
             return Base64.getEncoder().encodeToString(bytes);
         }
         if (value instanceof CharSequence || value instanceof Number || value instanceof Boolean || value instanceof Enum<?>) {
             return String.valueOf(value);
         }
+        if (value.getClass().isArray()) {
+            return stableArrayValue(value, activeObjects);
+        }
         if (value instanceof Map<?, ?> map) {
-            TreeMap<String, String> sorted = new TreeMap<>();
-            map.forEach((key, mapValue) -> sorted.put(String.valueOf(key), stableValue(mapValue)));
-            return sorted.toString();
+            if (!activeObjects.add(value)) {
+                return cycleValue(value);
+            }
+            try {
+                TreeMap<String, String> sorted = new TreeMap<>();
+                map.forEach((key, mapValue) -> sorted.put(String.valueOf(key), stableValue(mapValue, activeObjects)));
+                return sorted.toString();
+            } finally {
+                activeObjects.remove(value);
+            }
         }
         if (value instanceof Collection<?> collection) {
-            List<String> items = collection.stream().map(Sha256MessageAuditHasher::stableValue).collect(Collectors.toList());
-            return items.toString();
-        }
-        return stableObjectValue(value);
-    }
-    private static String stableObjectValue(Object value) {
-        TreeMap<String, String> fields = new TreeMap<>();
-        Class<?> type = value.getClass();
-        while (type != null && type != Object.class) {
-            for (Field field : type.getDeclaredFields()) {
-                if (Modifier.isStatic(field.getModifiers())) {
-                    continue;
-                }
-                field.setAccessible(true);
-                try {
-                    fields.putIfAbsent(field.getName(), stableValue(field.get(value)));
-                } catch (IllegalAccessException ignored) {
-                    // ignore inaccessible fields
-                }
+            if (!activeObjects.add(value)) {
+                return cycleValue(value);
             }
-            type = type.getSuperclass();
+            try {
+                List<String> items = collection.stream()
+                        .map(item -> stableValue(item, activeObjects))
+                        .collect(Collectors.toList());
+                return items.toString();
+            } finally {
+                activeObjects.remove(value);
+            }
         }
-        if (fields.isEmpty()) {
-            return value.getClass().getName() + ":" + String.valueOf(value);
+        return stableObjectValue(value, activeObjects);
+    }
+
+    private static String stableArrayValue(Object value, Set<Object> activeObjects) {
+        if (!activeObjects.add(value)) {
+            return cycleValue(value);
         }
-        return value.getClass().getName() + fields;
+        try {
+            int length = Array.getLength(value);
+            List<String> items = new ArrayList<>(length);
+            for (int index = 0; index < length; index++) {
+                items.add(stableValue(Array.get(value, index), activeObjects));
+            }
+            return value.getClass().getName() + items;
+        } finally {
+            activeObjects.remove(value);
+        }
+    }
+
+    private static String stableObjectValue(Object value, Set<Object> activeObjects) {
+        if (!activeObjects.add(value)) {
+            return cycleValue(value);
+        }
+        TreeMap<String, String> fields = new TreeMap<>();
+        try {
+            Class<?> type = value.getClass();
+            while (type != null && type != Object.class) {
+                for (Field field : type.getDeclaredFields()) {
+                    if (Modifier.isStatic(field.getModifiers())) {
+                        continue;
+                    }
+                    try {
+                        if (!field.trySetAccessible()) {
+                            continue;
+                        }
+                        fields.putIfAbsent(field.getName(), stableValue(field.get(value), activeObjects));
+                    } catch (IllegalAccessException | RuntimeException ignored) {
+                        // ignore inaccessible fields
+                    }
+                }
+                type = type.getSuperclass();
+            }
+            if (fields.isEmpty()) {
+                return value.getClass().getName() + ":" + String.valueOf(value);
+            }
+            return value.getClass().getName() + fields;
+        } finally {
+            activeObjects.remove(value);
+        }
+    }
+
+    private static String cycleValue(Object value) {
+        return "<cycle:" + value.getClass().getName() + ">";
     }
 
 }

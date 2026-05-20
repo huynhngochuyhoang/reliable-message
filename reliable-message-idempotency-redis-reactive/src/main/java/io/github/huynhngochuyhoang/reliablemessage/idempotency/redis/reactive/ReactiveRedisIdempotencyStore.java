@@ -92,13 +92,10 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
     private Mono<Boolean> tryRestartWithLock(String redisKey, String processingState, Duration ttl, Instant now) {
         ReactiveValueOperations<String, String> values = redisTemplate.opsForValue();
         String lockKey = redisKey + RESTART_LOCK_SUFFIX;
-        String lockToken = UUID.randomUUID().toString();
 
-        return values.setIfAbsent(lockKey, lockToken, RESTART_LOCK_TTL)
+        return values.setIfAbsent(lockKey, UUID.randomUUID().toString(), RESTART_LOCK_TTL)
                 .flatMap(locked -> Boolean.TRUE.equals(locked)
                         ? restartWithLock(values, redisKey, processingState, ttl, now)
-                        .flatMap(restarted -> releaseRestartLock(values, lockKey, lockToken).thenReturn(restarted))
-                        .onErrorResume(error -> releaseRestartLock(values, lockKey, lockToken).then(Mono.error(error)))
                         : Mono.just(false));
     }
 
@@ -114,13 +111,6 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
                         ? values.set(redisKey, processingState, ttl).thenReturn(true)
                         : Mono.just(false))
                 .switchIfEmpty(values.set(redisKey, processingState, ttl).thenReturn(true));
-    }
-
-    private Mono<Void> releaseRestartLock(ReactiveValueOperations<String, String> values, String lockKey, String lockToken) {
-        return values.get(lockKey)
-                .filter(lockToken::equals)
-                .flatMap(ignored -> redisTemplate.delete(lockKey))
-                .then();
     }
 
     private static boolean isRetryable(String current, Instant now) {
