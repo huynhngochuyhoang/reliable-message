@@ -5,7 +5,6 @@ import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
-import org.springframework.data.redis.core.script.RedisScript;
 import reactor.core.publisher.Mono;
 
 import java.time.Clock;
@@ -17,14 +16,9 @@ import java.util.UUID;
 public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
 
     private static final String DEFAULT_PREFIX = "reliable-message:idempotency:";
+    private static final Duration FALLBACK_TTL = Duration.ofHours(24);
     private static final String RESTART_LOCK_SUFFIX = ":restart-lock";
     private static final Duration RESTART_LOCK_TTL = Duration.ofSeconds(10);
-    private static final RedisScript<Long> COMPARE_AND_DELETE_SCRIPT = RedisScript.of(
-            "if redis.call('get', KEYS[1]) == ARGV[1] then "
-                    + "return redis.call('del', KEYS[1]) "
-                    + "else return 0 end",
-            Long.class
-    );
 
     private final ReactiveStringRedisTemplate redisTemplate;
     private final String keyPrefix;
@@ -103,8 +97,8 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
         return values.setIfAbsent(lockKey, lockToken, RESTART_LOCK_TTL)
                 .flatMap(locked -> Boolean.TRUE.equals(locked)
                         ? restartWithLock(values, redisKey, processingState, ttl, now)
-                        .flatMap(restarted -> releaseRestartLock(lockKey, lockToken).thenReturn(restarted))
-                        .onErrorResume(error -> releaseRestartLock(lockKey, lockToken).then(Mono.error(error)))
+                        .flatMap(restarted -> releaseRestartLock(values, lockKey, lockToken).thenReturn(restarted))
+                        .onErrorResume(error -> releaseRestartLock(values, lockKey, lockToken).then(Mono.error(error)))
                         : Mono.just(false));
     }
 
@@ -122,9 +116,10 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
                 .switchIfEmpty(values.set(redisKey, processingState, ttl).thenReturn(true));
     }
 
-    private Mono<Void> releaseRestartLock(String lockKey, String lockToken) {
-        return redisTemplate.execute(COMPARE_AND_DELETE_SCRIPT, java.util.List.of(lockKey), lockToken)
-                .next()
+    private Mono<Void> releaseRestartLock(ReactiveValueOperations<String, String> values, String lockKey, String lockToken) {
+        return values.get(lockKey)
+                .filter(lockToken::equals)
+                .flatMap(ignored -> redisTemplate.delete(lockKey))
                 .then();
     }
 
@@ -160,7 +155,7 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
             return null;
         }
         if (ttl.isNegative()) {
-            return null;
+            return FALLBACK_TTL;
         }
         return ttl;
     }

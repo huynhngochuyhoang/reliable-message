@@ -7,9 +7,9 @@ import io.github.huynhngochuyhoang.reliablemessage.core.PublishOptions;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.OutboxMessage;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -17,7 +17,6 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcOutboxStoreTest {
 
@@ -93,6 +92,7 @@ class JdbcOutboxStoreTest {
     void failedRowsAreRetriedAfterNextRetryAt() {
         TestStore testStore = store();
         testStore.store.save(message("event-1"));
+        assertEquals(1, testStore.store.findPending(10).size());
 
         testStore.store.markFailed("event-1", new IllegalStateException("broker down"), NOW.plusSeconds(30));
 

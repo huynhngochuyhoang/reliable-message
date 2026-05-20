@@ -4,6 +4,7 @@ import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyStartResult;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReliableMessageReactorContext;
 import reactor.core.publisher.Mono;
@@ -65,7 +66,7 @@ public class ReactiveKafkaReliableMessageHandler {
         return tryStart(message)
                 .flatMap(startResult -> {
                     if (!startResult.started()) {
-                        return startResult.completed()
+                        return startResult.state() == IdempotencyState.SUCCESS
                                 ? record.receiverOffset().commit()
                                 : Mono.empty();
                     }
