@@ -59,13 +59,13 @@ public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
                 if (exceptionClassifier.timeout(error)) {
                     metrics.timeout("mvc", "http");
                 }
-                if (attempt >= attempts || !exceptionClassifier.retryable(error)) {
+                if (attempt >= attempts || exceptionClassifier.timeout(error) || !exceptionClassifier.retryable(error)) {
                     metrics.failure("mvc", "http", error.getClass().getSimpleName());
                     metrics.duration(sample, "mvc", "http", "failed");
                     throw error;
                 }
                 metrics.retry("mvc", "http");
-                sleepBeforeRetry(attempt + 1);
+                sleepBeforeRetry(attempt);
             }
         }
         throw new IllegalStateException("unreachable");

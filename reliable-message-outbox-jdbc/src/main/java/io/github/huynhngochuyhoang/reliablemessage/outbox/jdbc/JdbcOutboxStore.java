@@ -151,12 +151,12 @@ public class JdbcOutboxStore implements OutboxStore {
         jdbcTemplate.update("""
                         update message_outbox
                         set status = ?, published_at = ?, last_error = null, processing_started_at = null
-                        where id = ? and status <> ?
+                        where id = ? and status = ?
                         """,
                 MessageStatus.PUBLISHED.name(),
                 Timestamp.from(clock.instant()),
                 id,
-                MessageStatus.PUBLISHED.name()
+                MessageStatus.PROCESSING.name()
         );
     }
 

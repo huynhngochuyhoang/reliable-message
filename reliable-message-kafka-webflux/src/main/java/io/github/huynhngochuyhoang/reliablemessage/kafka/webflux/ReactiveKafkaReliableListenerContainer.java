@@ -1,7 +1,6 @@
 package io.github.huynhngochuyhoang.reliablemessage.kafka.webflux;
 
 import reactor.core.Disposable;
-import reactor.core.publisher.Mono;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.util.retry.Retry;
 
@@ -38,8 +37,8 @@ public class ReactiveKafkaReliableListenerContainer {
                 .limitRate(prefetch)
                 .groupBy(record -> record.receiverOffset().topicPartition())
                 .flatMap(partitionRecords -> partitionRecords
-                        .concatMap(record -> handler.handle(new ReactorKafkaReceivedRecord(record), endpoint)
-                                .onErrorResume(error -> Mono.empty())))
+                        .concatMap(record -> handler.handle(new ReactorKafkaReceivedRecord(record), endpoint))
+                        .limitRate(maxConcurrency))
                 .retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
                         .maxBackoff(Duration.ofSeconds(30)))
                 .subscribe();

@@ -22,7 +22,7 @@ public final class Sha256MessageAuditHasher implements MessageAuditHasher {
         if (headers == null || headers.isEmpty()) {
             return null;
         }
-        return hash(new TreeMap<>(headers).toString().getBytes(StandardCharsets.UTF_8));
+        return hash(stableValue(headers).getBytes(StandardCharsets.UTF_8));
     }
 
     @Override
@@ -55,6 +55,6 @@ public final class Sha256MessageAuditHasher implements MessageAuditHasher {
             List<String> items = collection.stream().map(Sha256MessageAuditHasher::stableValue).collect(Collectors.toList());
             return items.toString();
         }
-        return value.getClass().getName() + ":" + value;
+        return value.getClass().getName();
     }
 }
