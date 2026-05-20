@@ -28,18 +28,21 @@ public class RpcWebFluxAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnBean(MeterRegistry.class)
     @ConditionalOnMissingBean(name = "reactiveRpcMetrics")
     RpcMetrics reactiveRpcMetrics(MeterRegistry meterRegistry) {
         return new RpcMetrics(meterRegistry, "rpc_reactive");
     }
 
     @Bean
+    @ConditionalOnBean(RpcMetrics.class)
     @ConditionalOnMissingBean
     RpcWebClientExchangeFilter rpcWebClientExchangeFilter(RpcMetrics reactiveRpcMetrics, RpcExceptionClassifier reactiveRpcExceptionClassifier) {
         return new RpcWebClientExchangeFilter(reactiveRpcMetrics, reactiveRpcExceptionClassifier);
     }
 
     @Bean
+    @ConditionalOnBean(RpcMetrics.class)
     @ConditionalOnMissingBean
     ReactiveRpcOperator reactiveRpcOperator(
             RpcWebFluxProperties properties,
@@ -55,6 +58,7 @@ public class RpcWebFluxAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnBean(RpcWebClientExchangeFilter.class)
     WebClientCustomizer rpcWebClientCustomizer(RpcWebClientExchangeFilter filter) {
         return builder -> builder.filter(filter);
     }

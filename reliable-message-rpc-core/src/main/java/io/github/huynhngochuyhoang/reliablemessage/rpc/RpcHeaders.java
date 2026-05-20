@@ -22,7 +22,7 @@ public final class RpcHeaders {
         put(headers, REQUEST_ID, context.requestId());
         put(headers, TRACE_ID, context.traceId());
         put(headers, TENANT_ID, context.tenantId());
-        headers.putAll(context.headers());
+        context.headers().forEach((name, value) -> headers.putIfAbsent(name, value));
         return Map.copyOf(headers);
     }
 

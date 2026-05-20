@@ -33,12 +33,14 @@ public class RpcMvcAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnBean(RpcMetrics.class)
     @ConditionalOnMissingBean
     RpcRestClientInterceptor rpcRestClientInterceptor(RpcMetrics rpcMvcMetrics, RpcExceptionClassifier rpcExceptionClassifier) {
         return new RpcRestClientInterceptor(rpcMvcMetrics, rpcExceptionClassifier);
     }
 
     @Bean
+    @ConditionalOnBean(RpcRestClientInterceptor.class)
     RestClientCustomizer rpcRestClientCustomizer(RpcRestClientInterceptor interceptor) {
         return builder -> builder.requestInterceptor(interceptor);
     }

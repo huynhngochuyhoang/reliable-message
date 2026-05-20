@@ -117,9 +117,8 @@ public class ReactiveRedisIdempotencyStore implements ReactiveIdempotencyStore {
     }
 
     private Mono<Void> releaseRestartLock(ReactiveValueOperations<String, String> values, String lockKey, String lockToken) {
-        return values.get(lockKey)
+        return values.getAndDelete(lockKey)
                 .filter(lockToken::equals)
-                .flatMap(ignored -> redisTemplate.delete(lockKey))
                 .then();
     }
 

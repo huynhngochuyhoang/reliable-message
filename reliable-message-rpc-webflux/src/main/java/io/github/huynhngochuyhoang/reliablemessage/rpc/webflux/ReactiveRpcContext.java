@@ -15,6 +15,9 @@ public final class ReactiveRpcContext {
     }
 
     public static Function<Context, Context> write(RpcContext context) {
+        if (context == null) {
+            throw new IllegalArgumentException("context must not be null");
+        }
         return reactorContext -> reactorContext.put(RPC_CONTEXT_KEY, context);
     }
 
