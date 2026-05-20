@@ -67,7 +67,7 @@ class ReactiveKafkaReliableMessageHandlerTest {
     }
 
     @Test
-    void failureRoutesAndCommitsThenPropagatesError() throws Exception {
+    void failureRoutesAndCommitsThenCompletes() throws Exception {
         FailingListener listener = new FailingListener();
         ReactiveKafkaRetryStrategy retryStrategy = org.mockito.Mockito.mock(ReactiveKafkaRetryStrategy.class);
         when(retryStrategy.routeFailure(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
@@ -81,8 +81,7 @@ class ReactiveKafkaReliableMessageHandlerTest {
         );
 
         StepVerifier.create(handler.handle(record(committed), endpoint(listener)))
-                .expectError(IllegalStateException.class)
-                .verify();
+                .verifyComplete();
 
         assertTrue(committed.get());
         verify(retryStrategy).routeFailure(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
