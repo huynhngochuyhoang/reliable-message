@@ -29,6 +29,9 @@ class RabbitReliablePublisherTest {
     @Test
     void publishesEnvelopeWithRabbitHeaders() {
         RabbitTemplate rabbitTemplate = org.mockito.Mockito.mock(RabbitTemplate.class);
+        CachingConnectionFactory connectionFactory = org.mockito.Mockito.mock(CachingConnectionFactory.class);
+        when(connectionFactory.isPublisherConfirms()).thenReturn(true);
+        when(rabbitTemplate.getConnectionFactory()).thenReturn(connectionFactory);
         when(rabbitTemplate.invoke(any(RabbitOperations.OperationsCallback.class))).thenAnswer(invocation -> {
             RabbitOperations.OperationsCallback<?> callback = invocation.getArgument(0);
             return callback.doInRabbit(rabbitTemplate);
@@ -73,7 +76,7 @@ class RabbitReliablePublisherTest {
     void skipsPublisherConfirmWhenConnectionFactoryDoesNotEnableConfirms() {
         RabbitTemplate rabbitTemplate = org.mockito.Mockito.mock(RabbitTemplate.class);
         CachingConnectionFactory connectionFactory = org.mockito.Mockito.mock(CachingConnectionFactory.class);
-        when(connectionFactory.getPublisherConfirmType()).thenReturn(CachingConnectionFactory.ConfirmType.NONE);
+        when(connectionFactory.isPublisherConfirms()).thenReturn(false);
         when(rabbitTemplate.getConnectionFactory()).thenReturn(connectionFactory);
 
         RabbitReliableMessageProperties properties = new RabbitReliableMessageProperties();

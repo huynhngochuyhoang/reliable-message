@@ -45,4 +45,4 @@ Add optional RPC reliability and observability support after the messaging miles
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Done
+- [x] Done

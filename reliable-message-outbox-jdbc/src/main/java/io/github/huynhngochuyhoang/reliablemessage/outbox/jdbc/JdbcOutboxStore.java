@@ -155,7 +155,8 @@ public class JdbcOutboxStore implements OutboxStore {
                         """,
                 MessageStatus.PUBLISHED.name(),
                 Timestamp.from(clock.instant()),
-                id
+                id,
+                MessageStatus.PROCESSING.name()
         );
     }
 
@@ -204,7 +205,8 @@ public class JdbcOutboxStore implements OutboxStore {
                         where id = ? and status = ?
                         """,
                 this::mapRow,
-                id
+                id,
+                MessageStatus.PROCESSING.name()
         );
     }
 

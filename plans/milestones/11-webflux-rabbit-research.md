@@ -40,4 +40,4 @@ Decide whether RabbitMQ WebFlux support can be provided honestly without claimin
 
 - [ ] Not started
 - [ ] In progress
-- [ ] Done
+- [x] Done
