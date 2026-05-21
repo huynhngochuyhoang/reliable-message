@@ -23,73 +23,73 @@ This milestone adds RabbitMQ support for WebFlux systems as a blocking bridge, h
 ## Phase 14.1 Event Bridge Module Scaffold And Properties
 
 Goal:
-- [ ] Create the event messaging bridge module with configuration only.
+- [x] Create the event messaging bridge module with configuration only.
 
 Implementation tasks:
-- [ ] Add `reliable-message-rabbit-webflux-bridge/pom.xml`.
-- [ ] Add the module to the root `pom.xml`.
-- [ ] Add `RabbitWebFluxBridgeProperties`.
-- [ ] Add `RabbitWebFluxBridgeAutoConfiguration`.
-- [ ] Add Spring Boot auto-configuration imports.
-- [ ] Use wording and package names that make this a blocking bridge, hybrid mode, and migration support module.
+- [x] Add `reliable-message-rabbit-webflux-bridge/pom.xml`.
+- [x] Add the module to the root `pom.xml`.
+- [x] Add `RabbitWebFluxBridgeProperties`.
+- [x] Add `RabbitWebFluxBridgeAutoConfiguration`.
+- [x] Add Spring Boot auto-configuration imports.
+- [x] Use wording and package names that make this a blocking bridge, hybrid mode, and migration support module.
 
 Tests to write first:
-- [ ] Auto-configuration backs off when disabled.
-- [ ] Properties bind `executor-mode`, `worker-threads`, `queue-capacity`, `max-concurrency`, and `rejection-policy`.
-- [ ] Invalid `max-concurrency <= 0` fails clearly.
-- [ ] Invalid negative `queue-capacity` fails clearly.
-- [ ] Invalid platform worker count fails clearly.
+- [x] Auto-configuration backs off when disabled.
+- [x] Properties bind `executor-mode`, `worker-threads`, `queue-capacity`, `max-concurrency`, and `rejection-policy`.
+- [x] Invalid `max-concurrency <= 0` fails clearly.
+- [x] Invalid negative `queue-capacity` fails clearly.
+- [x] Invalid platform worker count fails clearly.
 
 Success criteria:
-- [ ] Module compiles.
-- [ ] No Rabbit publish behavior exists yet.
-- [ ] No Rabbit consume behavior exists yet.
-- [ ] Defaults cannot create unbounded executor behavior.
+- [x] Module compiles.
+- [x] No Rabbit publish behavior exists yet.
+- [x] No Rabbit consume behavior exists yet.
+- [x] Defaults cannot create unbounded executor behavior.
 
 Risks:
-- [ ] Module naming accidentally suggests full reactive RabbitMQ support.
-- [ ] Defaults accidentally permit unbounded queueing later.
+- [x] Module naming accidentally suggests full reactive RabbitMQ support.
+- [x] Defaults accidentally permit unbounded queueing later.
 
 Out of scope:
-- [ ] Publisher implementation.
-- [ ] Listener implementation.
-- [ ] RPC implementation.
-- [ ] Outbox integration.
-- [ ] Metrics.
+- [x] Publisher implementation.
+- [x] Listener implementation.
+- [x] RPC implementation.
+- [x] Outbox integration.
+- [x] Metrics.
 
 ## Phase 14.2 Bridge Executor And Scheduler
 
 Goal:
-- [ ] Provide explicit blocking isolation for Rabbit event bridge work.
+- [x] Provide explicit blocking isolation for Rabbit event bridge work.
 
 Implementation tasks:
-- [ ] Add `RabbitBridgeExecutorProvider`.
-- [ ] Add `PlatformThreadRabbitBridgeExecutorProvider`.
-- [ ] Add `VirtualThreadRabbitBridgeExecutorProvider`.
-- [ ] Add a bridge scheduler or executor adapter backed by the configured executor.
-- [ ] Name bridge threads clearly.
-- [ ] Keep platform executor queue bounded.
+- [x] Add `RabbitBridgeExecutorProvider`.
+- [x] Add `PlatformThreadRabbitBridgeExecutorProvider`.
+- [x] Add `VirtualThreadRabbitBridgeExecutorProvider`.
+- [x] Add a bridge scheduler or executor adapter backed by the configured executor.
+- [x] Name bridge threads clearly.
+- [x] Keep platform executor queue bounded.
 
 Tests to write first:
-- [ ] Platform executor uses bounded worker count.
-- [ ] Platform executor uses bounded queue capacity.
-- [ ] Platform executor rejects when saturated.
-- [ ] Virtual-thread mode still depends on the external concurrency guard.
-- [ ] Bridge work does not use Reactor `parallel`, Netty event loop, or `ForkJoinPool.commonPool` by default.
+- [x] Platform executor uses bounded worker count.
+- [x] Platform executor uses bounded queue capacity.
+- [x] Platform executor rejects when saturated.
+- [x] Virtual-thread mode still depends on the external concurrency guard.
+- [x] Bridge work does not use Reactor `parallel`, Netty event loop, or `ForkJoinPool.commonPool` by default.
 
 Success criteria:
-- [ ] Blocking bridge executor is explicit and injectable.
-- [ ] No unbounded platform queue exists.
-- [ ] Virtual threads are available only as a blocking bridge executor option.
+- [x] Blocking bridge executor is explicit and injectable.
+- [x] No unbounded platform queue exists.
+- [x] Virtual threads are available only as a blocking bridge executor option.
 
 Risks:
-- [ ] Virtual-thread executor accepts too many submitted tasks without a guard.
-- [ ] Rejection behavior is hard to test if executor details leak.
+- [x] Virtual-thread executor accepts too many submitted tasks without a guard.
+- [x] Rejection behavior is hard to test if executor details leak.
 
 Out of scope:
-- [ ] RabbitTemplate publish calls.
-- [ ] Listener ack behavior.
-- [ ] RPC executor behavior.
+- [x] RabbitTemplate publish calls.
+- [x] Listener ack behavior.
+- [x] RPC executor behavior.
 
 ## Phase 14.3 Concurrency Guard And Fail-Fast Rejection
 
