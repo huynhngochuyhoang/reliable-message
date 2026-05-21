@@ -22,6 +22,7 @@
         <module>reliable-message-idempotency-r2dbc</module>
         <module>reliable-message-idempotency-redis-reactive</module>
         <module>reliable-message-rabbit-mvc</module>
+        <module>reliable-message-rabbit-webflux-bridge</module>
         <module>reliable-message-kafka-mvc</module>
         <module>reliable-message-kafka-webflux</module>
         <module>reliable-message-rpc-core</module>
