@@ -62,7 +62,7 @@ public class VirtualThreadRabbitBridgeExecutorProvider implements RabbitBridgeEx
         @Override
         public void execute(Runnable command) {
             if (!permits.tryAcquire()) {
-                throw new RejectedExecutionException("Rabbit bridge virtual executor concurrency limit reached");
+                throw new RabbitBridgeRejectedException("Rabbit bridge virtual executor concurrency limit reached");
             }
             try {
                 delegate.execute(() -> {
@@ -74,7 +74,7 @@ public class VirtualThreadRabbitBridgeExecutorProvider implements RabbitBridgeEx
                 });
             } catch (RuntimeException exception) {
                 permits.release();
-                throw exception;
+                throw new RabbitBridgeRejectedException("Rabbit bridge virtual executor rejected work", exception);
             }
         }
     }

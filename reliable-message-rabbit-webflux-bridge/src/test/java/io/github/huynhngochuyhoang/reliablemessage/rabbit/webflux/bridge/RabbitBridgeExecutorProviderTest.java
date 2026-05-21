@@ -141,7 +141,7 @@ class RabbitBridgeExecutorProviderTest {
             assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
 
             assertThatThrownBy(() -> executor.submit(() -> { }))
-                    .isInstanceOf(RejectedExecutionException.class);
+                    .isInstanceOf(RabbitBridgeRejectedException.class);
 
             release.countDown();
         }
