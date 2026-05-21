@@ -2,17 +2,13 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
 
 public class VirtualThreadRabbitBridgeExecutorProvider implements RabbitBridgeExecutorProvider {
 
     private final ExecutorService executor;
 
     public VirtualThreadRabbitBridgeExecutorProvider(RabbitWebFluxBridgeProperties.Bridge bridge) {
-        ThreadFactory threadFactory = Thread.ofVirtual()
-                .name("reliable-message-rabbit-bridge-virtual-", 1)
-                .factory();
-        this.executor = Executors.newThreadPerTaskExecutor(threadFactory);
+        this.executor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @Override
@@ -22,6 +18,6 @@ public class VirtualThreadRabbitBridgeExecutorProvider implements RabbitBridgeEx
 
     @Override
     public void close() {
-        executor.shutdownNow();
+        RabbitBridgeExecutorShutdown.close(executor);
     }
 }

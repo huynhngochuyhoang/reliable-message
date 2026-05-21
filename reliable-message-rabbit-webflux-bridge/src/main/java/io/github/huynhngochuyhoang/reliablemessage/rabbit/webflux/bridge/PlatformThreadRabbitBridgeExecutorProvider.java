@@ -27,7 +27,7 @@ public class PlatformThreadRabbitBridgeExecutorProvider implements RabbitBridgeE
 
     @Override
     public void close() {
-        executor.shutdownNow();
+        RabbitBridgeExecutorShutdown.close(executor);
     }
 
     private static BlockingQueue<Runnable> workQueue(int queueCapacity) {
@@ -36,10 +36,6 @@ public class PlatformThreadRabbitBridgeExecutorProvider implements RabbitBridgeE
 
     private static ThreadFactory threadFactory() {
         AtomicInteger counter = new AtomicInteger();
-        return task -> {
-            Thread thread = new Thread(task, "reliable-message-rabbit-bridge-platform-" + counter.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
+        return task -> new Thread(task, "reliable-message-rabbit-bridge-platform-" + counter.incrementAndGet());
     }
 }
