@@ -1,5 +1,6 @@
 package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 
+import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -16,6 +17,7 @@ public class RabbitBridgeConcurrencyGuard {
     }
 
     public Future<?> submit(ExecutorService executor, Runnable task) {
+        Objects.requireNonNull(task, "task");
         return submit(executor, () -> {
             task.run();
             return null;
@@ -23,6 +25,8 @@ public class RabbitBridgeConcurrencyGuard {
     }
 
     public <T> Future<T> submit(ExecutorService executor, Callable<T> task) {
+        Objects.requireNonNull(executor, "executor");
+        Objects.requireNonNull(task, "task");
         acquire();
         GuardedFutureTask<T> futureTask = new GuardedFutureTask<>(task, permits);
         try {
@@ -34,6 +38,9 @@ public class RabbitBridgeConcurrencyGuard {
         } catch (RuntimeException exception) {
             futureTask.releasePermit();
             throw exception;
+        } catch (Error error) {
+            futureTask.releasePermit();
+            throw error;
         }
     }
 
@@ -45,6 +52,7 @@ public class RabbitBridgeConcurrencyGuard {
 
     private static final class GuardedFutureTask<T> extends FutureTask<T> {
         private final Semaphore permits;
+        private final AtomicBoolean started = new AtomicBoolean();
         private final AtomicBoolean released = new AtomicBoolean();
 
         private GuardedFutureTask(Callable<T> callable, Semaphore permits) {
@@ -53,8 +61,22 @@ public class RabbitBridgeConcurrencyGuard {
         }
 
         @Override
-        protected void done() {
-            releasePermit();
+        public void run() {
+            started.set(true);
+            try {
+                super.run();
+            } finally {
+                releasePermit();
+            }
+        }
+
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            boolean cancelled = super.cancel(mayInterruptIfRunning);
+            if (cancelled && !started.get()) {
+                releasePermit();
+            }
+            return cancelled;
         }
 
         private void releasePermit() {

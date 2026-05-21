@@ -90,6 +90,61 @@ class RabbitBridgeConcurrencyGuardTest {
     }
 
     @Test
+    void keepsPermitAfterRunningCancellationUntilWorkFinishes() throws Exception {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        try {
+            Future<?> running = guard.submit(executor, () -> {
+                started.countDown();
+                while (finish.getCount() > 0) {
+                    try {
+                        finish.await(10, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException ignored) {
+                        // Simulates blocking Rabbit work that does not stop immediately on interrupt.
+                    }
+                }
+            });
+            assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(running.cancel(true)).isTrue();
+            assertThatThrownBy(() -> guard.submit(executor, () -> { }))
+                    .isInstanceOf(RabbitBridgeRejectedException.class);
+
+            finish.countDown();
+            executor.submit(() -> { }).get(1, TimeUnit.SECONDS);
+            guard.submit(executor, () -> { }).get(1, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void nullCallableDoesNotLeakPermit() {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        QueuingExecutorService executor = new QueuingExecutorService();
+
+        assertThatThrownBy(() -> guard.submit(executor, (Callable<Object>) null))
+                .isInstanceOf(NullPointerException.class);
+
+        guard.submit(executor, () -> { });
+        assertThat(executor.executeCalls()).isEqualTo(1);
+    }
+
+    @Test
+    void releasesPermitWhenExecutorThrowsErrorDuringSubmission() {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        ErrorOnceExecutorService executor = new ErrorOnceExecutorService();
+
+        assertThatThrownBy(() -> guard.submit(executor, () -> { }))
+                .isInstanceOf(AssertionError.class);
+
+        guard.submit(executor, () -> { });
+        assertThat(executor.accepted()).isEqualTo(1);
+    }
+
+    @Test
     void releasesPermitWhenExecutorRejectsSubmission() {
         RabbitBridgeConcurrencyGuard guard = guard(1);
         RejectOnceExecutorService executor = new RejectOnceExecutorService();
@@ -167,6 +222,25 @@ class RabbitBridgeConcurrencyGuardTest {
             if (reject) {
                 reject = false;
                 throw new RejectedExecutionException("reject once");
+            }
+            accepted.incrementAndGet();
+            super.execute(command);
+        }
+
+        int accepted() {
+            return accepted.get();
+        }
+    }
+
+    private static final class ErrorOnceExecutorService extends QueuingExecutorService {
+        private boolean fail = true;
+        private final AtomicInteger accepted = new AtomicInteger();
+
+        @Override
+        public void execute(Runnable command) {
+            if (fail) {
+                fail = false;
+                throw new AssertionError("submission failed");
             }
             accepted.incrementAndGet();
             super.execute(command);
