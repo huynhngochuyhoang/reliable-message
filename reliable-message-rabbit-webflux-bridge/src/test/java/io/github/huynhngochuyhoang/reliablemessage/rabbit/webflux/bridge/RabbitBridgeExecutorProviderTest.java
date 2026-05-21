@@ -110,46 +110,69 @@ class RabbitBridgeExecutorProviderTest {
     }
 
     @Test
-    void virtualThreadProviderRunsTasksOnVirtualThreads() throws Exception {
+    void virtualThreadProviderUsesNamedVirtualThreads() throws Exception {
         RabbitWebFluxBridgeProperties.Bridge bridge = bridge(1, 1);
         bridge.setExecutorMode(RabbitWebFluxBridgeProperties.ExecutorMode.VIRTUAL_THREAD);
 
         try (VirtualThreadRabbitBridgeExecutorProvider provider = new VirtualThreadRabbitBridgeExecutorProvider(bridge)) {
+            String threadName = provider.getExecutor().submit(() -> Thread.currentThread().getName()).get(1, TimeUnit.SECONDS);
             boolean virtual = provider.getExecutor().submit(() -> Thread.currentThread().isVirtual()).get(1, TimeUnit.SECONDS);
 
+            assertThat(threadName).startsWith("reliable-message-rabbit-bridge-virtual-");
             assertThat(virtual).isTrue();
         }
     }
 
     @Test
-    void virtualThreadProviderDoesNotApplyConcurrencyLimitBeforeGuardPhase() throws Exception {
-        RabbitWebFluxBridgeProperties.Bridge bridge = bridge(1, 0);
+    void virtualThreadProviderRejectsWhenMaxConcurrencyIsReached() throws Exception {
+        RabbitWebFluxBridgeProperties.Bridge bridge = bridge(1, 1);
         bridge.setExecutorMode(RabbitWebFluxBridgeProperties.ExecutorMode.VIRTUAL_THREAD);
+        bridge.setMaxConcurrency(1);
 
         try (VirtualThreadRabbitBridgeExecutorProvider provider = new VirtualThreadRabbitBridgeExecutorProvider(bridge)) {
             ExecutorService executor = provider.getExecutor();
-            CountDownLatch started = new CountDownLatch(3);
+            CountDownLatch started = new CountDownLatch(1);
             CountDownLatch release = new CountDownLatch(1);
 
-            Future<?> first = executor.submit(() -> {
+            executor.submit(() -> {
                 started.countDown();
                 await(release);
             });
-            Future<?> second = executor.submit(() -> {
-                started.countDown();
-                await(release);
-            });
-            Future<?> third = executor.submit(() -> {
-                started.countDown();
-                await(release);
-            });
-
             assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
 
+            assertThatThrownBy(() -> executor.submit(() -> { }))
+                    .isInstanceOf(RejectedExecutionException.class);
+
             release.countDown();
-            first.get(1, TimeUnit.SECONDS);
-            second.get(1, TimeUnit.SECONDS);
-            third.get(1, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void virtualThreadProviderReleasesPermitAfterSuccess() throws Exception {
+        RabbitWebFluxBridgeProperties.Bridge bridge = bridge(1, 1);
+        bridge.setExecutorMode(RabbitWebFluxBridgeProperties.ExecutorMode.VIRTUAL_THREAD);
+        bridge.setMaxConcurrency(1);
+
+        try (VirtualThreadRabbitBridgeExecutorProvider provider = new VirtualThreadRabbitBridgeExecutorProvider(bridge)) {
+            assertThat(provider.getExecutor().submit(() -> "first").get(1, TimeUnit.SECONDS)).isEqualTo("first");
+            assertThat(provider.getExecutor().submit(() -> "second").get(1, TimeUnit.SECONDS)).isEqualTo("second");
+        }
+    }
+
+    @Test
+    void virtualThreadProviderReleasesPermitAfterFailure() throws Exception {
+        RabbitWebFluxBridgeProperties.Bridge bridge = bridge(1, 1);
+        bridge.setExecutorMode(RabbitWebFluxBridgeProperties.ExecutorMode.VIRTUAL_THREAD);
+        bridge.setMaxConcurrency(1);
+
+        try (VirtualThreadRabbitBridgeExecutorProvider provider = new VirtualThreadRabbitBridgeExecutorProvider(bridge)) {
+            assertThatThrownBy(() -> provider.getExecutor().submit(() -> {
+                throw new IllegalStateException("boom");
+            }).get(1, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .hasCauseInstanceOf(IllegalStateException.class);
+
+            assertThat(provider.getExecutor().submit(() -> "recovered").get(1, TimeUnit.SECONDS)).isEqualTo("recovered");
         }
     }
 
