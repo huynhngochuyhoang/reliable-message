@@ -4,9 +4,12 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
+import java.lang.reflect.Constructor;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -148,6 +151,18 @@ class RabbitBridgeExecutorProviderTest {
     }
 
     @Test
+    void virtualThreadBoundedExecutorRethrowsNonRejectionRuntimeFailure() throws Exception {
+        RuntimeFailureExecutorService delegate = new RuntimeFailureExecutorService();
+        ExecutorService executor = boundedVirtualExecutor(delegate, 1);
+
+        assertThatThrownBy(() -> executor.execute(() -> { }))
+                .isInstanceOf(IllegalStateException.class);
+
+        executor.execute(() -> { });
+        assertThat(delegate.accepted()).isEqualTo(1);
+    }
+
+    @Test
     void virtualThreadProviderReleasesPermitAfterSuccess() throws Exception {
         RabbitWebFluxBridgeProperties.Bridge bridge = bridge(1, 1);
         bridge.setExecutorMode(RabbitWebFluxBridgeProperties.ExecutorMode.VIRTUAL_THREAD);
@@ -235,6 +250,14 @@ class RabbitBridgeExecutorProviderTest {
         }
     }
 
+    private static ExecutorService boundedVirtualExecutor(ExecutorService delegate, int maxConcurrency) throws Exception {
+        Class<?> executorType = Class.forName(VirtualThreadRabbitBridgeExecutorProvider.class.getName()
+                + "$BoundedVirtualThreadExecutorService");
+        Constructor<?> constructor = executorType.getDeclaredConstructor(ExecutorService.class, int.class);
+        constructor.setAccessible(true);
+        return (ExecutorService) constructor.newInstance(delegate, maxConcurrency);
+    }
+
     private static RabbitWebFluxBridgeProperties.Bridge bridge(int workerThreads, int queueCapacity) {
         RabbitWebFluxBridgeProperties.Bridge bridge = new RabbitWebFluxBridgeProperties.Bridge();
         bridge.setWorkerThreads(workerThreads);
@@ -247,6 +270,51 @@ class RabbitBridgeExecutorProviderTest {
             latch.await();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    private static final class RuntimeFailureExecutorService extends AbstractExecutorService {
+        private boolean fail = true;
+        private final AtomicBoolean shutdown = new AtomicBoolean();
+        private final AtomicInteger accepted = new AtomicInteger();
+
+        @Override
+        public void shutdown() {
+            shutdown.set(true);
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown.set(true);
+            return List.of();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown.get();
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdown.get();
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return shutdown.get();
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            if (fail) {
+                fail = false;
+                throw new IllegalStateException("runtime failure");
+            }
+            accepted.incrementAndGet();
+        }
+
+        int accepted() {
+            return accepted.get();
         }
     }
 }

@@ -72,9 +72,12 @@ public class VirtualThreadRabbitBridgeExecutorProvider implements RabbitBridgeEx
                         permits.release();
                     }
                 });
-            } catch (RuntimeException exception) {
+            } catch (RejectedExecutionException exception) {
                 permits.release();
                 throw new RabbitBridgeRejectedException("Rabbit bridge virtual executor rejected work", exception);
+            } catch (RuntimeException | Error exception) {
+                permits.release();
+                throw exception;
             }
         }
     }

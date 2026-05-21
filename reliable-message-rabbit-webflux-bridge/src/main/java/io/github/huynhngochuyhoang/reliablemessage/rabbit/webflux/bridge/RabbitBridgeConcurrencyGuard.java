@@ -13,6 +13,9 @@ public class RabbitBridgeConcurrencyGuard {
     }
 
     public RabbitBridgeConcurrencyGuard(int maxConcurrency) {
+        if (maxConcurrency <= 0) {
+            throw new IllegalArgumentException("maxConcurrency must be greater than 0");
+        }
         this.permits = new Semaphore(maxConcurrency);
     }
 

@@ -13,6 +13,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RabbitBridgeConcurrencyGuardTest {
 
     @Test
+    void constructorRejectsNonPositiveMaxConcurrency() {
+        assertThatThrownBy(() -> new RabbitBridgeConcurrencyGuard(0))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RabbitBridgeConcurrencyGuard(-1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void saturationFailsFastWithRabbitBridgeRejectedException() throws Exception {
         RabbitBridgeConcurrencyGuard guard = guard(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();
