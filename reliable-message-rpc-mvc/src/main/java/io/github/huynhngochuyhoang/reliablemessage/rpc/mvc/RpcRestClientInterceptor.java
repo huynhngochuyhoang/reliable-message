@@ -11,17 +11,23 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
+
+    private static final AtomicInteger THREAD_COUNTER = new AtomicInteger();
+    private static final ExecutorService BLOCKING_HTTP_EXECUTOR = Executors.newCachedThreadPool(task -> {
+        Thread thread = new Thread(task, "reliable-message-rpc-mvc-" + THREAD_COUNTER.incrementAndGet());
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final RpcMetrics metrics;
     private final RpcExceptionClassifier exceptionClassifier;
     private final RpcRetryPolicy retryPolicy;
     private final RpcTimeoutPolicy timeoutPolicy;
+    private final Executor blockingExecutor;
 
     public RpcRestClientInterceptor(
             RpcMetrics metrics,
@@ -29,10 +35,21 @@ public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
             RpcRetryPolicy retryPolicy,
             RpcTimeoutPolicy timeoutPolicy
     ) {
+        this(metrics, exceptionClassifier, retryPolicy, timeoutPolicy, BLOCKING_HTTP_EXECUTOR);
+    }
+
+    RpcRestClientInterceptor(
+            RpcMetrics metrics,
+            RpcExceptionClassifier exceptionClassifier,
+            RpcRetryPolicy retryPolicy,
+            RpcTimeoutPolicy timeoutPolicy,
+            Executor blockingExecutor
+    ) {
         this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
         this.exceptionClassifier = Objects.requireNonNull(exceptionClassifier, "exceptionClassifier must not be null");
         this.retryPolicy = Objects.requireNonNull(retryPolicy, "retryPolicy must not be null");
         this.timeoutPolicy = Objects.requireNonNull(timeoutPolicy, "timeoutPolicy must not be null");
+        this.blockingExecutor = Objects.requireNonNull(blockingExecutor, "blockingExecutor must not be null");
     }
 
     @Override
@@ -77,11 +94,11 @@ public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
             } catch (IOException ioException) {
                 throw new RuntimeException(ioException);
             }
-        });
+        }, blockingExecutor);
         try {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException timeoutException) {
-            waitForTimedOutAttempt(future);
+            future.cancel(true);
             throw new RuntimeException(timeoutException);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
@@ -95,20 +112,6 @@ public class RpcRestClientInterceptor implements ClientHttpRequestInterceptor {
                 throw runtime;
             }
             throw new IOException("RPC execution failed", cause);
-        }
-    }
-
-    private void waitForTimedOutAttempt(CompletableFuture<ClientHttpResponse> future) throws IOException {
-        try {
-            ClientHttpResponse lateResponse = future.get();
-            if (lateResponse != null) {
-                lateResponse.close();
-            }
-        } catch (InterruptedException interruptedException) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while waiting for timed out RPC response", interruptedException);
-        } catch (ExecutionException ignored) {
-            // The caller already observes the timeout; this only waits until the attempt is no longer in flight.
         }
     }
 

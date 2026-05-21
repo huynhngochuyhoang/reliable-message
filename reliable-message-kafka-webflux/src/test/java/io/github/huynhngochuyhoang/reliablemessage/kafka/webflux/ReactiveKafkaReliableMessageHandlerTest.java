@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyStartResult;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -46,11 +47,11 @@ class ReactiveKafkaReliableMessageHandlerTest {
     }
 
     @Test
-    void duplicateCommitsOffsetWithoutInvokingHandler() throws Exception {
+    void duplicateSuccessCommitsOffsetWithoutInvokingHandler() throws Exception {
         Listener listener = new Listener();
         ReactiveIdempotencyStore idempotencyStore = org.mockito.Mockito.mock(ReactiveIdempotencyStore.class);
         when(idempotencyStore.tryStart("event-1", Duration.ofHours(1)))
-                .thenReturn(Mono.just(IdempotencyStartResult.duplicate(io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState.SUCCESS)));
+                .thenReturn(Mono.just(IdempotencyStartResult.duplicate(IdempotencyState.SUCCESS)));
         AtomicBoolean committed = new AtomicBoolean(false);
         ReactiveKafkaReliableMessageHandler handler = new ReactiveKafkaReliableMessageHandler(
                 serializer(),
@@ -63,6 +64,28 @@ class ReactiveKafkaReliableMessageHandlerTest {
                 .verifyComplete();
 
         assertTrue(committed.get());
+        assertFalse(listener.invoked);
+    }
+
+    @Test
+    void duplicateProcessingFailsWithoutCommittingOffset() throws Exception {
+        Listener listener = new Listener();
+        ReactiveIdempotencyStore idempotencyStore = org.mockito.Mockito.mock(ReactiveIdempotencyStore.class);
+        when(idempotencyStore.tryStart("event-1", Duration.ofHours(1)))
+                .thenReturn(Mono.just(IdempotencyStartResult.duplicate(IdempotencyState.PROCESSING)));
+        AtomicBoolean committed = new AtomicBoolean(false);
+        ReactiveKafkaReliableMessageHandler handler = new ReactiveKafkaReliableMessageHandler(
+                serializer(),
+                idempotencyStore,
+                Duration.ofHours(1),
+                null
+        );
+
+        StepVerifier.create(handler.handle(record(committed), endpoint(listener)))
+                .expectError(RuntimeException.class)
+                .verify();
+
+        assertFalse(committed.get());
         assertFalse(listener.invoked);
     }
 

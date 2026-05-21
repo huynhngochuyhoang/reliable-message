@@ -45,6 +45,9 @@ public class ReactiveKafkaReliableMessageHandler {
                         message
                 ))
                 .onErrorResume(error -> {
+                    if (error instanceof DuplicateRecordInProgressException) {
+                        return Mono.error(error);
+                    }
                     ReliableMessage<?> message = messageRef.get();
                     Mono<Void> markFailed = idempotencyStarted.get() && message != null
                             ? idempotencyStore.markFailed(message.idempotencyKey(), error)
@@ -67,13 +70,19 @@ public class ReactiveKafkaReliableMessageHandler {
                     if (!startResult.started()) {
                         return startResult.state() == IdempotencyState.SUCCESS
                                 ? record.receiverOffset().commit()
-                                : Mono.empty();
+                                : Mono.error(new DuplicateRecordInProgressException(message.idempotencyKey(), startResult.state()));
                     }
                     idempotencyStarted.set(isIdempotencyEnabled(message));
                     return invoker.invoke(message)
                             .then(markSuccess(message))
                             .then(record.receiverOffset().commit());
                 });
+    }
+
+    private static final class DuplicateRecordInProgressException extends RuntimeException {
+        private DuplicateRecordInProgressException(String idempotencyKey, IdempotencyState state) {
+            super("Duplicate reliable message is still " + state + ": " + idempotencyKey);
+        }
     }
 
     private Mono<IdempotencyStartResult> tryStart(ReliableMessage<?> message) {
