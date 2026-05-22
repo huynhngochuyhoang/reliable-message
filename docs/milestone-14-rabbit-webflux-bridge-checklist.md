@@ -130,41 +130,41 @@ Out of scope:
 ## Phase 14.4 Reactive Event Publisher Bridge
 
 Goal:
-- [ ] Implement WebFlux-facing event publish through `RabbitTemplate`, isolated by the bridge executor and concurrency guard.
+- [x] Implement WebFlux-facing event publish through `RabbitTemplate`, isolated by the bridge executor and concurrency guard.
 
 Implementation tasks:
-- [ ] Add `ReactiveRabbitBridgePublisher`.
-- [ ] Wire it as a `ReactiveReliablePublisher` implementation.
-- [ ] Serialize messages using the existing reliable message format.
-- [ ] Publish events with `RabbitTemplate`.
-- [ ] Offload blocking publish work through the bridge executor.
-- [ ] Guard publish calls with the concurrency guard.
-- [ ] Ensure `AsyncRabbitTemplate` is not used.
+- [x] Add `ReactiveRabbitBridgePublisher`.
+- [x] Wire it as a `ReactiveReliablePublisher` implementation.
+- [x] Serialize messages using the existing reliable message format.
+- [x] Publish events with `RabbitTemplate`.
+- [x] Offload blocking publish work through the bridge executor.
+- [x] Guard publish calls with the concurrency guard.
+- [x] Ensure `AsyncRabbitTemplate` is not used.
 
 Tests to write first:
-- [ ] `publish(...)` calls `RabbitTemplate.convertAndSend`.
-- [ ] Publish runs on the bridge executor, not the caller thread.
-- [ ] Permit is released after successful publish.
-- [ ] Permit is released after publish failure.
-- [ ] Executor or guard saturation returns a `Mono` error.
-- [ ] Serialization failure does not call `RabbitTemplate`.
-- [ ] No `AsyncRabbitTemplate` dependency or usage exists in the event bridge module.
+- [x] `publish(...)` calls `RabbitTemplate.convertAndSend`.
+- [x] Publish runs on the bridge executor, not the caller thread.
+- [x] Permit is released after successful publish.
+- [x] Permit is released after publish failure.
+- [x] Executor or guard saturation returns a `Mono` error.
+- [x] Serialization failure does not call `RabbitTemplate`.
+- [x] No `AsyncRabbitTemplate` dependency or usage exists in the event bridge module.
 
 Success criteria:
-- [ ] Event publish works through `RabbitTemplate` only.
-- [ ] Blocking publish does not run inline on the subscriber thread.
-- [ ] No outbox integration exists in this phase.
+- [x] Event publish works through `RabbitTemplate` only.
+- [x] Blocking publish does not run inline on the subscriber thread.
+- [x] No outbox integration exists in this phase.
 
 Risks:
-- [ ] Blocking work is wrapped with `Mono.just(...)`.
-- [ ] `subscribeOn` uses an uncontrolled scheduler.
-- [ ] Event publishing accidentally gains RPC semantics.
+- [x] Blocking work is wrapped with `Mono.just(...)`.
+- [x] `subscribeOn` uses an uncontrolled scheduler.
+- [x] Event publishing accidentally gains RPC semantics.
 
 Out of scope:
-- [ ] Listener implementation.
-- [ ] Retry and DLQ integration.
-- [ ] RPC.
-- [ ] Outbox persistence.
+- [x] Listener implementation.
+- [x] Retry and DLQ integration.
+- [x] RPC.
+- [x] Outbox persistence.
 
 ## Phase 14.5 Reactive Event Listener Bridge With Strategy A
 
