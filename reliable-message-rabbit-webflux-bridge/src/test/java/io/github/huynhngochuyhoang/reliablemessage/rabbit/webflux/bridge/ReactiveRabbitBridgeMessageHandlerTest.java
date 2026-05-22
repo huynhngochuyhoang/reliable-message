@@ -95,6 +95,9 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+        assertThat(channel.nackMultiple()).isFalse();
+        assertThat(channel.nackRequeue()).isTrue();
     }
 
     @Test
@@ -106,6 +109,9 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
                 .isInstanceOf(CancellationException.class);
         assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+        assertThat(channel.nackMultiple()).isFalse();
+        assertThat(channel.nackRequeue()).isTrue();
     }
 
     @Test
@@ -132,6 +138,9 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         assertThat(failure.get()).isInstanceOf(CancellationException.class);
         assertThat(cancelled).isTrue();
         assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+        assertThat(channel.nackMultiple()).isFalse();
+        assertThat(channel.nackRequeue()).isTrue();
     }
 
     @Test
@@ -288,7 +297,10 @@ class ReactiveRabbitBridgeMessageHandlerTest {
 
     private static final class RecordingChannel {
         private final AtomicBoolean acked = new AtomicBoolean();
+        private final AtomicBoolean nacked = new AtomicBoolean();
         private final AtomicReference<Long> ackTimeNanos = new AtomicReference<>();
+        private final AtomicReference<Boolean> nackMultiple = new AtomicReference<>();
+        private final AtomicReference<Boolean> nackRequeue = new AtomicReference<>();
 
         Channel proxy() {
             return (Channel) Proxy.newProxyInstance(
@@ -298,6 +310,12 @@ class ReactiveRabbitBridgeMessageHandlerTest {
                         if (method.getName().equals("basicAck")) {
                             acked.set(true);
                             ackTimeNanos.set(System.nanoTime());
+                            return null;
+                        }
+                        if (method.getName().equals("basicNack")) {
+                            nacked.set(true);
+                            nackMultiple.set((Boolean) args[1]);
+                            nackRequeue.set((Boolean) args[2]);
                             return null;
                         }
                         if (method.getReturnType() == Boolean.TYPE) {
@@ -320,6 +338,18 @@ class ReactiveRabbitBridgeMessageHandlerTest {
 
         long ackTimeNanos() {
             return ackTimeNanos.get();
+        }
+
+        boolean nacked() {
+            return nacked.get();
+        }
+
+        boolean nackMultiple() {
+            return Boolean.TRUE.equals(nackMultiple.get());
+        }
+
+        boolean nackRequeue() {
+            return Boolean.TRUE.equals(nackRequeue.get());
         }
     }
 
