@@ -17,22 +17,42 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
             .withConfiguration(AutoConfigurations.of(RabbitWebFluxBridgeAutoConfiguration.class));
 
     @Test
-    void createsPropertiesBeanWhenEnabledByDefault() {
-        contextRunner.run(context -> assertThat(context)
-                .hasSingleBean(RabbitWebFluxBridgeProperties.class));
+    void createsPropertiesBeanWhenRabbitTransportIsEnabled() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .run(context -> assertThat(context)
+                        .hasSingleBean(RabbitWebFluxBridgeProperties.class));
     }
 
     @Test
     void backsOffWhenBridgeIsDisabled() {
         contextRunner
-                .withPropertyValues("message.reliability.rabbit.bridge.enabled=false")
+                .withPropertyValues(
+                        "message.reliability.transport=rabbit",
+                        "message.reliability.rabbit.bridge.enabled=false"
+                )
                 .run(context -> assertThat(context)
                         .doesNotHaveBean(RabbitWebFluxBridgeProperties.class));
     }
 
     @Test
+    void backsOffWhenTransportIsNotRabbit() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=kafka")
+                .withBean(RabbitTemplate.class, RecordingRabbitTemplate::new)
+                .withBean(MessageSerializer.class, RecordingSerializer::new)
+                .run(context -> assertThat(context)
+                        .doesNotHaveBean(RabbitWebFluxBridgeProperties.class)
+                        .doesNotHaveBean(RabbitBridgeExecutorProvider.class)
+                        .doesNotHaveBean(RabbitBridgeConcurrencyGuard.class)
+                        .doesNotHaveBean(ReactiveRabbitBridgePublisher.class)
+                        .doesNotHaveBean(ReactiveReliablePublisher.class));
+    }
+
+    @Test
     void wiresReactivePublisherWhenRabbitTemplateAndSerializerExist() {
         contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
                 .withBean(RabbitTemplate.class, RecordingRabbitTemplate::new)
                 .withBean(MessageSerializer.class, RecordingSerializer::new)
                 .run(context -> assertThat(context)
@@ -43,7 +63,7 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
     }
 
     private static final class RecordingRabbitTemplate extends RabbitTemplate {
-        
+        @Override
         public void afterPropertiesSet() {
         }
     }

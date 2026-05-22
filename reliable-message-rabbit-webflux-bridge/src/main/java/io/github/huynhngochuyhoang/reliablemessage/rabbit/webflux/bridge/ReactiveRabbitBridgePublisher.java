@@ -71,7 +71,7 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
             Future<?> future;
             try {
                 future = concurrencyGuard.submit(executorProvider.getExecutor(), () -> publishOnBridgeExecutor(eventName, message, sink));
-            } catch (RuntimeException | Error error) {
+            } catch (RuntimeException error) {
                 sink.error(error);
                 return;
             }
@@ -83,7 +83,7 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
         try {
             rabbitTemplate.convertAndSend(properties.getRabbit().getExchange(), eventName, message);
             sink.success();
-        } catch (RuntimeException | Error error) {
+        } catch (RuntimeException error) {
             sink.error(error);
             throw error;
         }

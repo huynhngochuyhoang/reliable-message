@@ -45,7 +45,9 @@ class RabbitWebFluxBridgePropertiesTest {
 
     @Test
     void usesBoundedDefaults() {
-        contextRunner.run(context -> {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .run(context -> {
             RabbitWebFluxBridgeProperties.Bridge bridge =
                     context.getBean(RabbitWebFluxBridgeProperties.class).getRabbit().getBridge();
 
@@ -61,21 +63,21 @@ class RabbitWebFluxBridgePropertiesTest {
     @Test
     void rejectsInvalidMaxConcurrency() {
         contextRunner
-                .withPropertyValues("message.reliability.rabbit.bridge.max-concurrency=0")
+                .withPropertyValues("message.reliability.transport=rabbit", "message.reliability.rabbit.bridge.max-concurrency=0")
                 .run(context -> assertThat(context).hasFailed());
     }
 
     @Test
     void rejectsNegativeQueueCapacity() {
         contextRunner
-                .withPropertyValues("message.reliability.rabbit.bridge.queue-capacity=-1")
+                .withPropertyValues("message.reliability.transport=rabbit", "message.reliability.rabbit.bridge.queue-capacity=-1")
                 .run(context -> assertThat(context).hasFailed());
     }
 
     @Test
     void rejectsInvalidWorkerThreads() {
         contextRunner
-                .withPropertyValues("message.reliability.rabbit.bridge.worker-threads=0")
+                .withPropertyValues("message.reliability.transport=rabbit", "message.reliability.rabbit.bridge.worker-threads=0")
                 .run(context -> assertThat(context).hasFailed());
     }
 }

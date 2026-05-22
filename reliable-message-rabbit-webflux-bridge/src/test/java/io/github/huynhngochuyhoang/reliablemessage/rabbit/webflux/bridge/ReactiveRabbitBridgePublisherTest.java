@@ -152,6 +152,9 @@ class ReactiveRabbitBridgePublisherTest {
                 .doesNotContain("ForkJoinPool")
                 .doesNotContain("commonPool")
                 .doesNotContain("Mono.just(rabbitTemplate");
+        assertThat(source)
+                .doesNotContain("catch (RuntimeException | Error")
+                .doesNotContain("catch (Error");
     }
 
     private static ReactiveRabbitBridgePublisher publisher(
