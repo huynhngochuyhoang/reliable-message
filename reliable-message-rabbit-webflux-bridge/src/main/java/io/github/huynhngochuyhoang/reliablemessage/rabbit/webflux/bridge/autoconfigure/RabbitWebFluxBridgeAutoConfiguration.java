@@ -4,7 +4,9 @@ import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSer
 import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.*;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -45,14 +47,31 @@ public class RabbitWebFluxBridgeAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnBean(ConnectionFactory.class)
+    @ConditionalOnMissingBean
+    RabbitAdmin reliableMessageRabbitBridgeAdmin(ConnectionFactory connectionFactory) {
+        return new RabbitAdmin(connectionFactory);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    ReactiveRabbitBridgeTopologyAutoConfigurer reactiveRabbitBridgeTopologyAutoConfigurer(
+            ObjectProvider<RabbitAdmin> rabbitAdmin,
+            RabbitWebFluxBridgeProperties properties
+    ) {
+        return new ReactiveRabbitBridgeTopologyAutoConfigurer(rabbitAdmin.getIfAvailable(() -> null), properties);
+    }
+
+    @Bean
     @ConditionalOnBean({ConnectionFactory.class, MessageSerializer.class})
     @ConditionalOnMissingBean
     ReactiveRabbitBridgeListenerRegistrar reactiveRabbitBridgeListenerRegistrar(
             ConnectionFactory connectionFactory,
             MessageSerializer serializer,
-            RabbitWebFluxBridgeProperties properties
+            RabbitWebFluxBridgeProperties properties,
+            ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer
     ) {
-        return new ReactiveRabbitBridgeListenerRegistrar(connectionFactory, serializer, properties);
+        return new ReactiveRabbitBridgeListenerRegistrar(connectionFactory, serializer, properties, topologyAutoConfigurer);
     }
 
     @Bean
