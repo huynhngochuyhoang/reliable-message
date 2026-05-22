@@ -3,6 +3,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.autoco
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.*;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -41,6 +42,17 @@ public class RabbitWebFluxBridgeAutoConfiguration {
     @ConditionalOnMissingBean
     RabbitBridgeConcurrencyGuard rabbitBridgeConcurrencyGuard(RabbitWebFluxBridgeProperties properties) {
         return new RabbitBridgeConcurrencyGuard(properties.getRabbit().getBridge());
+    }
+
+    @Bean
+    @ConditionalOnBean({ConnectionFactory.class, MessageSerializer.class})
+    @ConditionalOnMissingBean
+    ReactiveRabbitBridgeListenerRegistrar reactiveRabbitBridgeListenerRegistrar(
+            ConnectionFactory connectionFactory,
+            MessageSerializer serializer,
+            RabbitWebFluxBridgeProperties properties
+    ) {
+        return new ReactiveRabbitBridgeListenerRegistrar(connectionFactory, serializer, properties);
     }
 
     @Bean
