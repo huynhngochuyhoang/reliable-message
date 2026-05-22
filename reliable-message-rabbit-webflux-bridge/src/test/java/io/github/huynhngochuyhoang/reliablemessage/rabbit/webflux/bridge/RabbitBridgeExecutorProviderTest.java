@@ -5,6 +5,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.*;
@@ -190,6 +191,21 @@ class RabbitBridgeExecutorProviderTest {
             assertThat(provider.getExecutor().submit(() -> "recovered").get(1, TimeUnit.SECONDS)).isEqualTo("recovered");
         }
     }
+    
+    
+    @Test
+    void virtualThreadProviderReleasesPermitWhenCancelWinsAfterRunStarts() throws Exception {
+        Semaphore permits = new Semaphore(0);
+        Future<?> future = permitReleasingFutureTask(() -> "not-run", permits);
+        Field started = future.getClass().getDeclaredField("started");
+        started.setAccessible(true);
+        ((AtomicBoolean) started.get(future)).set(true);
+
+        assertThat(future.cancel(true)).isTrue();
+        ((Runnable) future).run();
+
+        assertThat(permits.tryAcquire()).isTrue();
+    }
 
     @Test
     void virtualThreadProviderCloseLetsActiveTasksFinishBeforeInterrupting() throws Exception {
@@ -248,6 +264,14 @@ class RabbitBridgeExecutorProviderTest {
                 scheduler.dispose();
             }
         }
+    }
+
+    private static Future<?> permitReleasingFutureTask(Callable<?> callable, Semaphore permits) throws Exception {
+        Class<?> taskType = Class.forName(VirtualThreadRabbitBridgeExecutorProvider.class.getName()
+                + "$PermitReleasingFutureTask");
+        Constructor<?> constructor = taskType.getDeclaredConstructor(Callable.class, Semaphore.class);
+        constructor.setAccessible(true);
+        return (Future<?>) constructor.newInstance(callable, permits);
     }
 
     private static ExecutorService boundedVirtualExecutor(ExecutorService delegate, int maxConcurrency) throws Exception {

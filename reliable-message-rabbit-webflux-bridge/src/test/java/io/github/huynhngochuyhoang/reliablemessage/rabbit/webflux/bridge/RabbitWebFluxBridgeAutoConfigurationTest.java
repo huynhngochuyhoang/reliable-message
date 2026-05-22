@@ -15,6 +15,13 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(RabbitWebFluxBridgeAutoConfiguration.class));
+    
+    
+    @Test
+    void createsPropertiesBeanWhenTransportIsUnset() {
+        contextRunner.run(context -> assertThat(context)
+                .hasSingleBean(RabbitWebFluxBridgeProperties.class));
+    }
 
     @Test
     void createsPropertiesBeanWhenRabbitTransportIsEnabled() {

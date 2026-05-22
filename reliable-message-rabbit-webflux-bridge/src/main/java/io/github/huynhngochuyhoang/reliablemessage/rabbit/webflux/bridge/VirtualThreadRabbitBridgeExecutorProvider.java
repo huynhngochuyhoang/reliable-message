@@ -140,7 +140,13 @@ public class VirtualThreadRabbitBridgeExecutorProvider implements RabbitBridgeEx
         @Override
         public void run() {
             started.set(true);
-            super.run();
+            try {
+                super.run();
+            } finally {
+                if (isCancelled()) {
+                    releasePermit();
+                }
+            }
         }
 
         @Override

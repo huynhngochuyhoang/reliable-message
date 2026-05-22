@@ -16,7 +16,7 @@ import java.time.Clock;
 
 @AutoConfiguration
 @ConditionalOnClass(RabbitTemplate.class)
-@ConditionalOnProperty(prefix = "message.reliability", name = "transport", havingValue = "rabbit")
+@ConditionalOnProperty(prefix = "message.reliability", name = "transport", havingValue = "rabbit", matchIfMissing = true)
 @ConditionalOnProperty(prefix = "message.reliability.rabbit.bridge", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(RabbitWebFluxBridgeProperties.class)
 public class RabbitWebFluxBridgeAutoConfiguration {
