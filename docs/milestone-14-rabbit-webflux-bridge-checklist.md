@@ -94,38 +94,38 @@ Out of scope:
 ## Phase 14.3 Concurrency Guard And Fail-Fast Rejection
 
 Goal:
-- [ ] Add bounded concurrency before any blocking Rabbit bridge work is submitted.
+- [x] Add bounded concurrency before any blocking Rabbit bridge work is submitted.
 
 Implementation tasks:
-- [ ] Add `RabbitBridgeConcurrencyGuard`.
-- [ ] Add `RabbitBridgeRejectedException`.
-- [ ] Support `fail-fast` rejection only.
-- [ ] Acquire permits before executor submission.
-- [ ] Release permits on success, failure, cancellation, and executor rejection.
+- [x] Add `RabbitBridgeConcurrencyGuard`.
+- [x] Add `RabbitBridgeRejectedException`.
+- [x] Support `fail-fast` rejection only.
+- [x] Acquire permits before executor submission.
+- [x] Release permits on success, failure, cancellation, and executor rejection.
 
 Tests to write first:
-- [ ] Permit is released on success.
-- [ ] Permit is released on failure.
-- [ ] Permit is released on cancellation.
-- [ ] Saturation fails fast.
-- [ ] Executor rejection does not leak a permit.
-- [ ] No unbounded queueing is introduced.
+- [x] Permit is released on success.
+- [x] Permit is released on failure.
+- [x] Permit is released on cancellation.
+- [x] Saturation fails fast.
+- [x] Executor rejection does not leak a permit.
+- [x] No unbounded queueing is introduced.
 
 Success criteria:
-- [ ] Every bridge operation must pass through the guard before execution.
-- [ ] Saturation produces a controlled error.
-- [ ] No `block-caller` or `drop-and-metric` behavior exists.
+- [x] Every bridge operation must pass through the guard before execution.
+- [x] Saturation produces a controlled error.
+- [x] No `block-caller` or `drop-and-metric` behavior exists.
 
 Risks:
-- [ ] Permit is released without being acquired.
-- [ ] Permit leaks on cancellation.
-- [ ] Work is queued before a permit is acquired.
+- [x] Permit is released without being acquired.
+- [x] Permit leaks on cancellation.
+- [x] Work is queued before a permit is acquired.
 
 Out of scope:
-- [ ] `block-caller` rejection.
-- [ ] `drop-and-metric` rejection.
-- [ ] Metrics.
-- [ ] RabbitTemplate integration.
+- [x] `block-caller` rejection.
+- [x] `drop-and-metric` rejection.
+- [x] Metrics.
+- [x] RabbitTemplate integration.
 
 ## Phase 14.4 Reactive Event Publisher Bridge
 
