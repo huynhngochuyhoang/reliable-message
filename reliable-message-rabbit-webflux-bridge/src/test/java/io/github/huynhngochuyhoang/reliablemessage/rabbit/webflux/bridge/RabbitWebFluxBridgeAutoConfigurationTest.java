@@ -6,6 +6,7 @@ import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.autocon
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -84,6 +85,16 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
                 .run(context -> assertThat(context)
                         .hasSingleBean(ReactiveRabbitBridgeListenerRegistrar.class));
     }
+    @Test
+    void createsRabbitAdminAndTopologyAutoConfigurerWhenConnectionFactoryExists() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .run(context -> assertThat(context)
+                        .hasSingleBean(RabbitAdmin.class)
+                        .hasSingleBean(ReactiveRabbitBridgeTopologyAutoConfigurer.class));
+    }
+
 
     private static ConnectionFactory connectionFactory() {
         return (ConnectionFactory) Proxy.newProxyInstance(

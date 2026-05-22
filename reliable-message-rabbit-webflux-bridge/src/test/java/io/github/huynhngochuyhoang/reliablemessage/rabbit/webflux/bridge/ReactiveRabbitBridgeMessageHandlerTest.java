@@ -109,6 +109,32 @@ class ReactiveRabbitBridgeMessageHandlerTest {
     }
 
     @Test
+    void interruptedListenerCancelsInFlightHandlerAndDoesNotAck() throws Exception {
+        AtomicBoolean cancelled = new AtomicBoolean();
+        PublicListener listener = new PublicListener(Mono.<Void>never().doOnCancel(() -> cancelled.set(true)));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle");
+        RecordingChannel channel = new RecordingChannel();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread listenerThread = new Thread(() -> {
+            try {
+                handler.onMessage(message(), channel.proxy());
+            } catch (Throwable error) {
+                failure.set(error);
+            }
+        }, "rabbit-listener-test");
+
+        listenerThread.start();
+        await(listener::invoked);
+        listenerThread.interrupt();
+        listenerThread.join(1000);
+
+        assertThat(listenerThread.isAlive()).isFalse();
+        assertThat(failure.get()).isInstanceOf(CancellationException.class);
+        assertThat(cancelled).isTrue();
+        assertThat(channel.acked()).isFalse();
+    }
+
+    @Test
     void listenerWorkDoesNotUseReactorParallelOrCommonPoolByDefault() throws Exception {
         AtomicReference<String> threadName = new AtomicReference<>();
         PublicListener listener = new PublicListener(Mono.fromRunnable(() -> threadName.set(Thread.currentThread().getName())));

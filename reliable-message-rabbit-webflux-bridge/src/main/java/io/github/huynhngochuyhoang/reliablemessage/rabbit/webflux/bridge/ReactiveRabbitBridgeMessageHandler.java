@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageListener {
@@ -37,13 +38,18 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
     }
 
     private void awaitHandler(ReliableMessage<?> reliableMessage) {
+        CompletableFuture<Void> future = null;
         try {
             Mono<Void> handling = ReliableMessageReactorContext.writeMessage(
                     invoker.invoke(endpoint, reliableMessage),
                     reliableMessage
             );
-            handling.toFuture().get();
+            future = handling.toFuture();
+            future.get();
         } catch (InterruptedException error) {
+            if (future != null) {
+                future.cancel(true);
+            }
             Thread.currentThread().interrupt();
             throw new CancellationException("Reactive Rabbit bridge listener was interrupted");
         } catch (ExecutionException error) {

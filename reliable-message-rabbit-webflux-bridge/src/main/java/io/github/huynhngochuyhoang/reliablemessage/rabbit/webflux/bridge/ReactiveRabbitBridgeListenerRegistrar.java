@@ -29,6 +29,7 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
     private final MessageSerializer serializer;
     private final RabbitWebFluxBridgeProperties properties;
     private final ReactiveRabbitBridgeListenerMethodInvoker invoker;
+    private final ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer;
     private final List<ReactiveRabbitBridgeListenerEndpoint> endpoints = new ArrayList<>();
     private final List<SimpleMessageListenerContainer> containers = new ArrayList<>();
     private ApplicationContext applicationContext;
@@ -38,9 +39,19 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
             MessageSerializer serializer,
             RabbitWebFluxBridgeProperties properties
     ) {
+        this(connectionFactory, serializer, properties, new ReactiveRabbitBridgeTopologyAutoConfigurer(null, properties));
+    }
+
+    public ReactiveRabbitBridgeListenerRegistrar(
+            ConnectionFactory connectionFactory,
+            MessageSerializer serializer,
+            RabbitWebFluxBridgeProperties properties,
+            ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer
+    ) {
         this.connectionFactory = Objects.requireNonNull(connectionFactory, "connectionFactory");
         this.serializer = Objects.requireNonNull(serializer, "serializer");
         this.properties = Objects.requireNonNull(properties, "properties");
+        this.topologyAutoConfigurer = Objects.requireNonNull(topologyAutoConfigurer, "topologyAutoConfigurer");
         this.invoker = new ReactiveRabbitBridgeListenerMethodInvoker();
     }
 
@@ -90,6 +101,7 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
                 payloadType(invocableMethod)
         );
         endpoints.add(endpoint);
+        topologyAutoConfigurer.declareListenerTopology(endpoint.eventName(), endpoint.queueName());
 
         SimpleMessageListenerContainer container = container(endpoint);
         containers.add(container);
