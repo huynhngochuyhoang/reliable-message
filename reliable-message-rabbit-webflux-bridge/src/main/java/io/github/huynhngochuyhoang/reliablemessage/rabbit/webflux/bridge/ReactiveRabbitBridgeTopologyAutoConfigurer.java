@@ -19,7 +19,7 @@ public class ReactiveRabbitBridgeTopologyAutoConfigurer {
     }
 
     public void declareListenerTopology(String eventName, String queueName) {
-        if (rabbitAdmin == null) {
+        if (!properties.getRabbit().isAutoDeclare() || rabbitAdmin == null) {
             return;
         }
 

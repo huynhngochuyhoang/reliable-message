@@ -47,13 +47,6 @@ public class RabbitWebFluxBridgeAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnBean(ConnectionFactory.class)
-    @ConditionalOnMissingBean
-    RabbitAdmin reliableMessageRabbitBridgeAdmin(ConnectionFactory connectionFactory) {
-        return new RabbitAdmin(connectionFactory);
-    }
-
-    @Bean
     @ConditionalOnMissingBean
     ReactiveRabbitBridgeTopologyAutoConfigurer reactiveRabbitBridgeTopologyAutoConfigurer(
             ObjectProvider<RabbitAdmin> rabbitAdmin,

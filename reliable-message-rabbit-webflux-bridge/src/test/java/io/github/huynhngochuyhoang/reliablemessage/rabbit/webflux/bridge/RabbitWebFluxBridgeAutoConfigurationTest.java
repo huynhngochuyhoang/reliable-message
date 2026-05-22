@@ -19,8 +19,7 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(RabbitWebFluxBridgeAutoConfiguration.class));
-    
-    
+
     @Test
     void createsPropertiesBeanWhenTransportIsUnset() {
         contextRunner.run(context -> assertThat(context)
@@ -85,16 +84,27 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
                 .run(context -> assertThat(context)
                         .hasSingleBean(ReactiveRabbitBridgeListenerRegistrar.class));
     }
+
     @Test
-    void createsRabbitAdminAndTopologyAutoConfigurerWhenConnectionFactoryExists() {
+    void doesNotCreateRabbitAdminWhenOnlyConnectionFactoryExists() {
         contextRunner
                 .withPropertyValues("message.reliability.transport=rabbit")
                 .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
                 .run(context -> assertThat(context)
-                        .hasSingleBean(RabbitAdmin.class)
+                        .doesNotHaveBean(RabbitAdmin.class)
                         .hasSingleBean(ReactiveRabbitBridgeTopologyAutoConfigurer.class));
     }
 
+    @Test
+    void wiresTopologyAutoConfigurerWithUserProvidedRabbitAdmin() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .withBean(RabbitAdmin.class, () -> new RabbitAdmin(connectionFactory()))
+                .run(context -> assertThat(context)
+                        .hasSingleBean(RabbitAdmin.class)
+                        .hasSingleBean(ReactiveRabbitBridgeTopologyAutoConfigurer.class));
+    }
 
     private static ConnectionFactory connectionFactory() {
         return (ConnectionFactory) Proxy.newProxyInstance(

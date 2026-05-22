@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -164,6 +165,57 @@ class RabbitBridgeConcurrencyGuardTest {
         guard.submit(executor, () -> { });
         assertThat(executor.accepted()).isEqualTo(1);
     }
+    @Test
+    void submitFutureCompletesOnlyAfterPermitIsReleased() throws Exception {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        DirectExecutorService executor = new DirectExecutorService();
+        AtomicBoolean completed = new AtomicBoolean();
+
+        CompletableFuture<String> first = guard.submitFuture(executor, () -> "first");
+        first.whenComplete((result, error) -> {
+            guard.submit(executor, () -> { });
+            completed.set(true);
+        });
+
+        assertThat(first.get(1, TimeUnit.SECONDS)).isEqualTo("first");
+        assertThat(completed).isTrue();
+    }
+
+    private static final class DirectExecutorService extends AbstractExecutorService {
+        private boolean shutdown;
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown = true;
+            return List.of();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return shutdown;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            command.run();
+        }
+    }
+
 
     private static RabbitBridgeConcurrencyGuard guard(int maxConcurrency) {
         RabbitWebFluxBridgeProperties.Bridge bridge = new RabbitWebFluxBridgeProperties.Bridge();

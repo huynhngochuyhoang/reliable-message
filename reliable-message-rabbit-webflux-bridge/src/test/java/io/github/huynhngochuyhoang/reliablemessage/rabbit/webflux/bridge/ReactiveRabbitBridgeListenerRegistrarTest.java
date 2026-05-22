@@ -54,7 +54,6 @@ class ReactiveRabbitBridgeListenerRegistrarTest {
         }
     }
 
-    
     @Test
     void declaresListenerQueueExchangeAndBinding() {
         RabbitWebFluxBridgeProperties properties = new RabbitWebFluxBridgeProperties();
@@ -89,6 +88,21 @@ class ReactiveRabbitBridgeListenerRegistrarTest {
         }
     }
 
+    @Test
+    void skipsTopologyDeclarationWhenAutoDeclareIsDisabled() {
+        RabbitWebFluxBridgeProperties properties = new RabbitWebFluxBridgeProperties();
+        properties.getRabbit().setAutoDeclare(false);
+        RecordingRabbitAdmin rabbitAdmin = new RecordingRabbitAdmin(connectionFactory());
+        ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer =
+                new ReactiveRabbitBridgeTopologyAutoConfigurer(rabbitAdmin, properties);
+
+        topologyAutoConfigurer.declareListenerTopology("order.created", "orders.order.created");
+
+        assertThat(rabbitAdmin.exchanges()).isEmpty();
+        assertThat(rabbitAdmin.queues()).isEmpty();
+        assertThat(rabbitAdmin.bindings()).isEmpty();
+    }
+
     private static ConnectionFactory connectionFactory() {
         return (ConnectionFactory) Proxy.newProxyInstance(
                 ConnectionFactory.class.getClassLoader(),
@@ -120,18 +134,18 @@ class ReactiveRabbitBridgeListenerRegistrarTest {
             super(connectionFactory);
         }
 
-        
+        @Override
         public void declareExchange(Exchange exchange) {
             exchanges.add(exchange);
         }
 
-        
+        @Override
         public String declareQueue(Queue queue) {
             queues.add(queue);
             return queue.getName();
         }
 
-        
+        @Override
         public void declareBinding(Binding binding) {
             bindings.add(binding);
         }

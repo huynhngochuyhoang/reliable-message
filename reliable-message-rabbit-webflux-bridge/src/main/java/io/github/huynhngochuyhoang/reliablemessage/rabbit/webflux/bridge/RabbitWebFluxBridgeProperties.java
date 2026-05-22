@@ -67,6 +67,7 @@ public class RabbitWebFluxBridgeProperties {
     public static class Rabbit {
         private String exchange = "app.events";
         private boolean listenerAutoStartup = true;
+        private boolean autoDeclare = true;
         private final Bridge bridge = new Bridge();
 
         public String getExchange() {
@@ -83,6 +84,14 @@ public class RabbitWebFluxBridgeProperties {
 
         public void setListenerAutoStartup(boolean listenerAutoStartup) {
             this.listenerAutoStartup = listenerAutoStartup;
+        }
+
+        public boolean isAutoDeclare() {
+            return autoDeclare;
+        }
+
+        public void setAutoDeclare(boolean autoDeclare) {
+            this.autoDeclare = autoDeclare;
         }
 
         public Bridge getBridge() {
