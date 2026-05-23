@@ -24,7 +24,8 @@ class RabbitWebFluxBridgePropertiesTest {
                         "message.reliability.rabbit.bridge.worker-threads=8",
                         "message.reliability.rabbit.bridge.queue-capacity=128",
                         "message.reliability.rabbit.bridge.max-concurrency=64",
-                        "message.reliability.rabbit.bridge.rejection-policy=fail-fast"
+                        "message.reliability.rabbit.bridge.rejection-policy=fail-fast",
+                        "message.reliability.rabbit.auto-declare=false"
                 )
                 .run(context -> {
                     RabbitWebFluxBridgeProperties properties = context.getBean(RabbitWebFluxBridgeProperties.class);
@@ -33,6 +34,7 @@ class RabbitWebFluxBridgePropertiesTest {
                     assertThat(properties.getTransport()).isEqualTo("rabbit");
                     assertThat(properties.getMode()).isEqualTo("blocking-bridge");
                     assertThat(properties.getRabbit().getExchange()).isEqualTo("orders.events");
+                    assertThat(properties.getRabbit().isAutoDeclare()).isFalse();
                     assertThat(properties.getRabbit().getBridge().getExecutorMode())
                             .isEqualTo(RabbitWebFluxBridgeProperties.ExecutorMode.VIRTUAL_THREAD);
                     assertThat(properties.getRabbit().getBridge().getWorkerThreads()).isEqualTo(8);
@@ -57,6 +59,7 @@ class RabbitWebFluxBridgePropertiesTest {
             assertThat(bridge.getQueueCapacity()).isGreaterThan(0);
             assertThat(bridge.getMaxConcurrency()).isGreaterThan(0);
             assertThat(bridge.getRejectionPolicy()).isEqualTo(RabbitWebFluxBridgeProperties.RejectionPolicy.FAIL_FAST);
+            assertThat(context.getBean(RabbitWebFluxBridgeProperties.class).getRabbit().isAutoDeclare()).isTrue();
         });
     }
 

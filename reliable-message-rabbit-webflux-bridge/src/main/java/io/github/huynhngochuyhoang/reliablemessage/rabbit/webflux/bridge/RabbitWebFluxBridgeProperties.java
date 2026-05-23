@@ -8,6 +8,7 @@ public class RabbitWebFluxBridgeProperties {
     private String runtime = "webflux";
     private String transport = "rabbit";
     private String mode = "blocking-bridge";
+    private String serviceName = "application";
     private final Rabbit rabbit = new Rabbit();
 
     public String getRuntime() {
@@ -34,8 +35,24 @@ public class RabbitWebFluxBridgeProperties {
         this.mode = mode;
     }
 
+    public String getServiceName() {
+        return serviceName;
+    }
+
+    public void setServiceName(String serviceName) {
+        this.serviceName = serviceName;
+    }
+
     public Rabbit getRabbit() {
         return rabbit;
+    }
+
+    public String queueName(String eventName) {
+        String safeServiceName = serviceName == null || serviceName.isBlank() ? "application" : serviceName;
+        if (eventName == null || eventName.isBlank()) {
+            throw new IllegalArgumentException("eventName must not be blank");
+        }
+        return safeServiceName + "." + eventName;
     }
 
     public enum ExecutorMode {
@@ -49,6 +66,8 @@ public class RabbitWebFluxBridgeProperties {
 
     public static class Rabbit {
         private String exchange = "app.events";
+        private boolean listenerAutoStartup = true;
+        private boolean autoDeclare = true;
         private final Bridge bridge = new Bridge();
 
         public String getExchange() {
@@ -57,6 +76,22 @@ public class RabbitWebFluxBridgeProperties {
 
         public void setExchange(String exchange) {
             this.exchange = exchange;
+        }
+
+        public boolean isListenerAutoStartup() {
+            return listenerAutoStartup;
+        }
+
+        public void setListenerAutoStartup(boolean listenerAutoStartup) {
+            this.listenerAutoStartup = listenerAutoStartup;
+        }
+
+        public boolean isAutoDeclare() {
+            return autoDeclare;
+        }
+
+        public void setAutoDeclare(boolean autoDeclare) {
+            this.autoDeclare = autoDeclare;
         }
 
         public Bridge getBridge() {

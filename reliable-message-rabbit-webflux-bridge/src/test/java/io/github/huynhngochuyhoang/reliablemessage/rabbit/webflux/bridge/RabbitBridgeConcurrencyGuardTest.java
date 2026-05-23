@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -98,25 +99,57 @@ class RabbitBridgeConcurrencyGuardTest {
     }
 
     @Test
-    void keepsPermitAfterRunningCancellationUntilWorkFinishes() throws Exception {
+    void cancelWithInterruptInterruptsRunningBridgeTask() throws Exception {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        try {
+            Future<?> running = guard.submit(executor, () -> {
+                started.countDown();
+                try {
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(10));
+                } catch (InterruptedException exception) {
+                    interrupted.countDown();
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(running.cancel(true)).isTrue();
+
+            assertThat(interrupted.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(running::get).isInstanceOf(CancellationException.class);
+            executor.submit(() -> { }).get(1, TimeUnit.SECONDS);
+            guard.submit(executor, () -> { }).get(1, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void cancelledRunningTaskKeepsPermitUntilWorkStops() throws Exception {
         RabbitBridgeConcurrencyGuard guard = guard(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch finish = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
         try {
             Future<?> running = guard.submit(executor, () -> {
                 started.countDown();
                 while (finish.getCount() > 0) {
                     try {
                         finish.await(10, TimeUnit.MILLISECONDS);
-                    } catch (InterruptedException ignored) {
-                        // Simulates blocking Rabbit work that does not stop immediately on interrupt.
+                    } catch (InterruptedException exception) {
+                        interrupted.countDown();
                     }
                 }
             });
             assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
 
             assertThat(running.cancel(true)).isTrue();
+
+            assertThat(interrupted.await(1, TimeUnit.SECONDS)).isTrue();
             assertThatThrownBy(() -> guard.submit(executor, () -> { }))
                     .isInstanceOf(RabbitBridgeRejectedException.class);
 
@@ -124,6 +157,39 @@ class RabbitBridgeConcurrencyGuardTest {
             executor.submit(() -> { }).get(1, TimeUnit.SECONDS);
             guard.submit(executor, () -> { }).get(1, TimeUnit.SECONDS);
         } finally {
+            finish.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void cancelWithoutInterruptDoesNotInterruptRunningBridgeTask() throws Exception {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
+        try {
+            Future<?> running = guard.submit(executor, () -> {
+                started.countDown();
+                try {
+                    finish.await();
+                } catch (InterruptedException exception) {
+                    interrupted.set(true);
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(running.cancel(false)).isTrue();
+            Thread.sleep(100);
+
+            assertThat(interrupted).isFalse();
+            finish.countDown();
+            executor.submit(() -> { }).get(1, TimeUnit.SECONDS);
+            guard.submit(executor, () -> { }).get(1, TimeUnit.SECONDS);
+        } finally {
+            finish.countDown();
             executor.shutdownNow();
         }
     }
@@ -163,6 +229,56 @@ class RabbitBridgeConcurrencyGuardTest {
 
         guard.submit(executor, () -> { });
         assertThat(executor.accepted()).isEqualTo(1);
+    }
+    @Test
+    void submitFutureCompletesOnlyAfterPermitIsReleased() throws Exception {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        DirectExecutorService executor = new DirectExecutorService();
+        AtomicBoolean completed = new AtomicBoolean();
+
+        CompletableFuture<String> first = guard.submitFuture(executor, () -> "first");
+        first.whenComplete((result, error) -> {
+            guard.submit(executor, () -> { });
+            completed.set(true);
+        });
+
+        assertThat(first.get(1, TimeUnit.SECONDS)).isEqualTo("first");
+        assertThat(completed).isTrue();
+    }
+
+    private static final class DirectExecutorService extends AbstractExecutorService {
+        private boolean shutdown;
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdown = true;
+            return List.of();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdown;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return shutdown;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            command.run();
+        }
     }
 
     private static RabbitBridgeConcurrencyGuard guard(int maxConcurrency) {

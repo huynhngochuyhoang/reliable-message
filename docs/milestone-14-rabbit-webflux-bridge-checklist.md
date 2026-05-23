@@ -169,40 +169,40 @@ Out of scope:
 ## Phase 14.5 Reactive Event Listener Bridge With Strategy A
 
 Goal:
-- [ ] Consume Rabbit messages with Spring AMQP listener infrastructure and invoke reactive handlers with simple ack-after-completion semantics.
+- [x] Consume Rabbit messages with Spring AMQP listener infrastructure and invoke reactive handlers with simple ack-after-completion semantics.
 
 Implementation tasks:
-- [ ] Add `ReactiveRabbitBridgeListenerEndpoint`.
-- [ ] Add `ReactiveRabbitBridgeListenerMethodInvoker`.
-- [ ] Add `ReactiveRabbitBridgeListenerRegistrar`.
-- [ ] Add `ReactiveRabbitBridgeMessageHandler`.
-- [ ] Wire Spring AMQP listener container support.
-- [ ] Invoke handler `Mono` and wait for completion using Strategy A.
-- [ ] Ack only after handler `Mono` completes successfully.
+- [x] Add `ReactiveRabbitBridgeListenerEndpoint`.
+- [x] Add `ReactiveRabbitBridgeListenerMethodInvoker`.
+- [x] Add `ReactiveRabbitBridgeListenerRegistrar`.
+- [x] Add `ReactiveRabbitBridgeMessageHandler`.
+- [x] Wire Spring AMQP listener container support.
+- [x] Invoke handler `Mono` and wait for completion using Strategy A.
+- [x] Ack only after handler `Mono` completes successfully.
 
 Tests to write first:
-- [ ] `@ReactiveReliableListener` method returning `Mono<Void>` is invoked.
-- [ ] Non-public listener method can be invoked.
-- [ ] Handler `Mono` is awaited before ack.
-- [ ] Ack happens only after delayed `Mono` completion.
-- [ ] Handler error does not ack as success.
-- [ ] No Strategy B async ack coordination is present.
+- [x] `@ReactiveReliableListener` method returning `Mono<Void>` is invoked.
+- [x] Non-public listener method can be invoked.
+- [x] Handler `Mono` is awaited before ack.
+- [x] Ack happens only after delayed `Mono` completion.
+- [x] Handler error does not ack as success.
+- [x] No Strategy B async ack coordination is present.
 
 Success criteria:
-- [ ] Strategy A listener bridge works.
-- [ ] Ack-after-success is proven by tests.
-- [ ] Blocking wait is explicit and isolated to the listener bridge boundary.
+- [x] Strategy A listener bridge works.
+- [x] Ack-after-success is proven by tests.
+- [x] Blocking wait is explicit and isolated to the listener bridge boundary.
 
 Risks:
-- [ ] Ack happens before `Mono` completion.
-- [ ] Listener blocks a thread that should not be blocked.
-- [ ] Reactor Context is lost.
+- [x] Ack happens before `Mono` completion.
+- [x] Listener blocks a thread that should not be blocked.
+- [x] Reactor Context is lost.
 
 Out of scope:
-- [ ] Strategy B async ack coordination.
-- [ ] Retry and DLQ routing.
-- [ ] RPC.
-- [ ] Metrics.
+- [x] Strategy B async ack coordination.
+- [x] Retry and DLQ routing.
+- [x] RPC.
+- [x] Metrics.
 
 ## Phase 14.6 Listener Failure, Duplicate, And Idempotency Semantics
 

@@ -3,6 +3,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class RabbitBridgeConcurrencyGuard {
 
@@ -28,22 +29,23 @@ public class RabbitBridgeConcurrencyGuard {
     }
 
     public <T> Future<T> submit(ExecutorService executor, Callable<T> task) {
+        return submitFuture(executor, task);
+    }
+
+    public <T> CompletableFuture<T> submitFuture(ExecutorService executor, Callable<T> task) {
         Objects.requireNonNull(executor, "executor");
         Objects.requireNonNull(task, "task");
         acquire();
-        GuardedFutureTask<T> futureTask = new GuardedFutureTask<>(task, permits);
+        GuardedCompletableFuture<T> future = new GuardedCompletableFuture<>(task, permits);
         try {
-            executor.execute(futureTask);
-            return futureTask;
+            executor.execute(future);
+            return future;
         } catch (RejectedExecutionException exception) {
-            futureTask.releasePermit();
+            future.releasePermit();
             throw new RabbitBridgeRejectedException("Rabbit bridge executor rejected work", exception);
-        } catch (RuntimeException exception) {
-            futureTask.releasePermit();
+        } catch (RuntimeException | Error exception) {
+            future.releasePermit();
             throw exception;
-        } catch (Error error) {
-            futureTask.releasePermit();
-            throw error;
         }
     }
 
@@ -53,31 +55,48 @@ public class RabbitBridgeConcurrencyGuard {
         }
     }
 
-    private static final class GuardedFutureTask<T> extends FutureTask<T> {
+    private static final class GuardedCompletableFuture<T> extends CompletableFuture<T> implements Runnable {
+        private final Callable<T> callable;
         private final Semaphore permits;
-        private final AtomicBoolean started = new AtomicBoolean();
         private final AtomicBoolean released = new AtomicBoolean();
+        private final AtomicReference<Thread> runner = new AtomicReference<>();
 
-        private GuardedFutureTask(Callable<T> callable, Semaphore permits) {
-            super(callable);
+        private GuardedCompletableFuture(Callable<T> callable, Semaphore permits) {
+            this.callable = callable;
             this.permits = permits;
         }
 
         @Override
         public void run() {
-            started.set(true);
-            try {
-                super.run();
-            } finally {
+            runner.set(Thread.currentThread());
+            if (isCancelled()) {
                 releasePermit();
+                runner.compareAndSet(Thread.currentThread(), null);
+                return;
+            }
+
+            try {
+                T result = callable.call();
+                releasePermit();
+                complete(result);
+            } catch (Throwable error) {
+                releasePermit();
+                completeExceptionally(error);
+            } finally {
+                runner.compareAndSet(Thread.currentThread(), null);
             }
         }
 
         @Override
         public boolean cancel(boolean mayInterruptIfRunning) {
             boolean cancelled = super.cancel(mayInterruptIfRunning);
-            if (cancelled && !started.get()) {
-                releasePermit();
+            if (cancelled) {
+                Thread runningThread = runner.get();
+                if (runningThread == null) {
+                    releasePermit();
+                } else if (mayInterruptIfRunning) {
+                    runningThread.interrupt();
+                }
             }
             return cancelled;
         }

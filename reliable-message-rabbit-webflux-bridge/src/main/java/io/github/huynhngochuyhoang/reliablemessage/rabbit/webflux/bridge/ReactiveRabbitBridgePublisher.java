@@ -17,7 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 
 public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher {
 
@@ -67,26 +67,22 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
     }
 
     private Mono<Void> submitPublish(String eventName, Message message) {
-        return Mono.create(sink -> {
-            Future<?> future;
+        return Mono.defer(() -> {
+            CompletableFuture<Void> future;
             try {
-                future = concurrencyGuard.submit(executorProvider.getExecutor(), () -> publishOnBridgeExecutor(eventName, message, sink));
+                future = concurrencyGuard.submitFuture(executorProvider.getExecutor(), () -> {
+                    publishOnBridgeExecutor(eventName, message);
+                    return null;
+                });
             } catch (RuntimeException error) {
-                sink.error(error);
-                return;
+                return Mono.error(error);
             }
-            sink.onCancel(() -> future.cancel(true));
+            return Mono.fromFuture(future);
         });
     }
 
-    private void publishOnBridgeExecutor(String eventName, Message message, reactor.core.publisher.MonoSink<Void> sink) {
-        try {
-            rabbitTemplate.convertAndSend(properties.getRabbit().getExchange(), eventName, message);
-            sink.success();
-        } catch (RuntimeException error) {
-            sink.error(error);
-            throw error;
-        }
+    private void publishOnBridgeExecutor(String eventName, Message message) {
+        rabbitTemplate.convertAndSend(properties.getRabbit().getExchange(), eventName, message);
     }
 
     private ReliableMessage<Object> toReliableMessage(String eventName, Object payload, PublishOptions options) {

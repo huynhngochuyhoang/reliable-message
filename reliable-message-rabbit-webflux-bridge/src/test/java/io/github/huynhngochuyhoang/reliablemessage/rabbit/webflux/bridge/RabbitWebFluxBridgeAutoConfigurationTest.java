@@ -5,9 +5,13 @@ import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSer
 import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.autoconfigure.RabbitWebFluxBridgeAutoConfiguration;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+
+import java.lang.reflect.Proxy;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -15,8 +19,7 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(RabbitWebFluxBridgeAutoConfiguration.class));
-    
-    
+
     @Test
     void createsPropertiesBeanWhenTransportIsUnset() {
         contextRunner.run(context -> assertThat(context)
@@ -67,6 +70,48 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
                         .hasSingleBean(RabbitBridgeConcurrencyGuard.class)
                         .hasSingleBean(ReactiveRabbitBridgePublisher.class)
                         .hasSingleBean(ReactiveReliablePublisher.class));
+    }
+
+    @Test
+    void wiresReactiveListenerRegistrarWhenConnectionFactoryAndSerializerExist() {
+        contextRunner
+                .withPropertyValues(
+                        "message.reliability.transport=rabbit",
+                        "message.reliability.rabbit.listener-auto-startup=false"
+                )
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .withBean(MessageSerializer.class, RecordingSerializer::new)
+                .run(context -> assertThat(context)
+                        .hasSingleBean(ReactiveRabbitBridgeListenerRegistrar.class));
+    }
+
+    @Test
+    void doesNotCreateRabbitAdminWhenOnlyConnectionFactoryExists() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .run(context -> assertThat(context)
+                        .doesNotHaveBean(RabbitAdmin.class)
+                        .hasSingleBean(ReactiveRabbitBridgeTopologyAutoConfigurer.class));
+    }
+
+    @Test
+    void wiresTopologyAutoConfigurerWithUserProvidedRabbitAdmin() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .withBean(RabbitAdmin.class, () -> new RabbitAdmin(connectionFactory()))
+                .run(context -> assertThat(context)
+                        .hasSingleBean(RabbitAdmin.class)
+                        .hasSingleBean(ReactiveRabbitBridgeTopologyAutoConfigurer.class));
+    }
+
+    private static ConnectionFactory connectionFactory() {
+        return (ConnectionFactory) Proxy.newProxyInstance(
+                ConnectionFactory.class.getClassLoader(),
+                new Class<?>[]{ConnectionFactory.class},
+                (proxy, method, args) -> null
+        );
     }
 
     private static final class RecordingRabbitTemplate extends RabbitTemplate {
