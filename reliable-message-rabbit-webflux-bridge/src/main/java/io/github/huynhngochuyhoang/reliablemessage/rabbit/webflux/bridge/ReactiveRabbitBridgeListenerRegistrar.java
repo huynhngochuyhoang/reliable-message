@@ -66,7 +66,7 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
         for (String beanName : beanNames) {
             Object bean = applicationContext.getBean(beanName);
             Class<?> targetClass = AopUtils.getTargetClass(bean);
-            ReflectionUtils.doWithMethods(targetClass, method -> registerEndpoint(beanName, bean, method));
+            ReflectionUtils.doWithMethods(targetClass, method -> registerEndpoint(beanName, bean, targetClass, method));
         }
     }
 
@@ -83,13 +83,13 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
         return List.copyOf(containers);
     }
 
-    private void registerEndpoint(String beanName, Object bean, Method method) {
+    private void registerEndpoint(String beanName, Object bean, Class<?> targetClass, Method method) {
         ReactiveReliableListener listener = AnnotationUtils.findAnnotation(method, ReactiveReliableListener.class);
         if (listener == null) {
             return;
         }
 
-        Method invocableMethod = AopUtils.selectInvocableMethod(method, bean.getClass());
+        Method invocableMethod = AopUtils.selectInvocableMethod(method, targetClass);
         validateListenerMethod(invocableMethod);
         String eventName = listener.value();
         ReactiveRabbitBridgeListenerEndpoint endpoint = new ReactiveRabbitBridgeListenerEndpoint(
@@ -115,6 +115,7 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
         SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
         container.setQueueNames(endpoint.queueName());
         container.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        container.setPrefetchCount(1);
         container.setMessageListener(new ReactiveRabbitBridgeMessageHandler(endpoint, serializer, invoker));
         container.setAutoStartup(properties.getRabbit().isListenerAutoStartup());
         return container;

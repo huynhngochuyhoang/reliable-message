@@ -128,6 +128,41 @@ class RabbitBridgeConcurrencyGuardTest {
     }
 
     @Test
+    void cancelledRunningTaskKeepsPermitUntilWorkStops() throws Exception {
+        RabbitBridgeConcurrencyGuard guard = guard(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        try {
+            Future<?> running = guard.submit(executor, () -> {
+                started.countDown();
+                while (finish.getCount() > 0) {
+                    try {
+                        finish.await(10, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException exception) {
+                        interrupted.countDown();
+                    }
+                }
+            });
+            assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(running.cancel(true)).isTrue();
+
+            assertThat(interrupted.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> guard.submit(executor, () -> { }))
+                    .isInstanceOf(RabbitBridgeRejectedException.class);
+
+            finish.countDown();
+            executor.submit(() -> { }).get(1, TimeUnit.SECONDS);
+            guard.submit(executor, () -> { }).get(1, TimeUnit.SECONDS);
+        } finally {
+            finish.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void cancelWithoutInterruptDoesNotInterruptRunningBridgeTask() throws Exception {
         RabbitBridgeConcurrencyGuard guard = guard(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();

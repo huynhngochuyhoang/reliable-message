@@ -91,13 +91,12 @@ public class RabbitBridgeConcurrencyGuard {
         public boolean cancel(boolean mayInterruptIfRunning) {
             boolean cancelled = super.cancel(mayInterruptIfRunning);
             if (cancelled) {
-                if (mayInterruptIfRunning) {
-                    Thread runningThread = runner.get();
-                    if (runningThread != null) {
-                        runningThread.interrupt();
-                    }
+                Thread runningThread = runner.get();
+                if (runningThread == null) {
+                    releasePermit();
+                } else if (mayInterruptIfRunning) {
+                    runningThread.interrupt();
                 }
-                releasePermit();
             }
             return cancelled;
         }
