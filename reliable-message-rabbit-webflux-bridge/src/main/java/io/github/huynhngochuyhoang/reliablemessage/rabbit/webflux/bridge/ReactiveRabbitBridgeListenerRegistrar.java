@@ -2,6 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliableListener;
 import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -19,17 +20,22 @@ import reactor.core.publisher.Mono;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingSingleton, DisposableBean, ApplicationContextAware {
 
+    private static final Duration DEFAULT_IDEMPOTENCY_TTL = Duration.ofHours(24);
+
     private final ConnectionFactory connectionFactory;
     private final MessageSerializer serializer;
     private final RabbitWebFluxBridgeProperties properties;
     private final ReactiveRabbitBridgeListenerMethodInvoker invoker;
     private final ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer;
+    private final ReactiveIdempotencyStore idempotencyStore;
+    private final ReactiveRabbitBridgeFailureHandler failureHandler;
     private final List<ReactiveRabbitBridgeListenerEndpoint> endpoints = new ArrayList<>();
     private final List<SimpleMessageListenerContainer> containers = new ArrayList<>();
     private ApplicationContext applicationContext;
@@ -48,10 +54,23 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
             RabbitWebFluxBridgeProperties properties,
             ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer
     ) {
+        this(connectionFactory, serializer, properties, topologyAutoConfigurer, null, ReactiveRabbitBridgeFailureHandler.noop());
+    }
+
+    public ReactiveRabbitBridgeListenerRegistrar(
+            ConnectionFactory connectionFactory,
+            MessageSerializer serializer,
+            RabbitWebFluxBridgeProperties properties,
+            ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer,
+            ReactiveIdempotencyStore idempotencyStore,
+            ReactiveRabbitBridgeFailureHandler failureHandler
+    ) {
         this.connectionFactory = Objects.requireNonNull(connectionFactory, "connectionFactory");
         this.serializer = Objects.requireNonNull(serializer, "serializer");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.topologyAutoConfigurer = Objects.requireNonNull(topologyAutoConfigurer, "topologyAutoConfigurer");
+        this.idempotencyStore = idempotencyStore;
+        this.failureHandler = failureHandler == null ? ReactiveRabbitBridgeFailureHandler.noop() : failureHandler;
         this.invoker = new ReactiveRabbitBridgeListenerMethodInvoker();
     }
 
@@ -116,7 +135,14 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
         container.setQueueNames(endpoint.queueName());
         container.setAcknowledgeMode(AcknowledgeMode.MANUAL);
         container.setPrefetchCount(1);
-        container.setMessageListener(new ReactiveRabbitBridgeMessageHandler(endpoint, serializer, invoker));
+        container.setMessageListener(new ReactiveRabbitBridgeMessageHandler(
+                endpoint,
+                serializer,
+                invoker,
+                idempotencyStore,
+                DEFAULT_IDEMPOTENCY_TTL,
+                failureHandler
+        ));
         container.setAutoStartup(properties.getRabbit().isListenerAutoStartup());
         return container;
     }
