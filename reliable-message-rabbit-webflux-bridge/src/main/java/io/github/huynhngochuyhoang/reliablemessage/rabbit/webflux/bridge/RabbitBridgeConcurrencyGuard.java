@@ -3,6 +3,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class RabbitBridgeConcurrencyGuard {
 
@@ -57,8 +58,8 @@ public class RabbitBridgeConcurrencyGuard {
     private static final class GuardedCompletableFuture<T> extends CompletableFuture<T> implements Runnable {
         private final Callable<T> callable;
         private final Semaphore permits;
-        private final AtomicBoolean started = new AtomicBoolean();
         private final AtomicBoolean released = new AtomicBoolean();
+        private final AtomicReference<Thread> runner = new AtomicReference<>();
 
         private GuardedCompletableFuture(Callable<T> callable, Semaphore permits) {
             this.callable = callable;
@@ -67,9 +68,10 @@ public class RabbitBridgeConcurrencyGuard {
 
         @Override
         public void run() {
-            started.set(true);
+            runner.set(Thread.currentThread());
             if (isCancelled()) {
                 releasePermit();
+                runner.compareAndSet(Thread.currentThread(), null);
                 return;
             }
 
@@ -80,13 +82,21 @@ public class RabbitBridgeConcurrencyGuard {
             } catch (Throwable error) {
                 releasePermit();
                 completeExceptionally(error);
+            } finally {
+                runner.compareAndSet(Thread.currentThread(), null);
             }
         }
 
         @Override
         public boolean cancel(boolean mayInterruptIfRunning) {
             boolean cancelled = super.cancel(mayInterruptIfRunning);
-            if (cancelled && !started.get()) {
+            if (cancelled) {
+                if (mayInterruptIfRunning) {
+                    Thread runningThread = runner.get();
+                    if (runningThread != null) {
+                        runningThread.interrupt();
+                    }
+                }
                 releasePermit();
             }
             return cancelled;
