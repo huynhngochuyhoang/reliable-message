@@ -333,6 +333,39 @@ class ReactiveRabbitBridgeMessageHandlerTest {
     }
 
     @Test
+    void deserializationFailureInvokesFailureHookAndNacks() throws Exception {
+        IllegalStateException deserializeFailure = new IllegalStateException("deserialize failed");
+        RecordingFailureHandler failureHandler = new RecordingFailureHandler();
+        PublicListener listener = new PublicListener(Mono.empty());
+        Method method = findMethod(listener.getClass(), "handle");
+        ReactiveRabbitBridgeListenerEndpoint endpoint = new ReactiveRabbitBridgeListenerEndpoint(
+                "listener",
+                listener,
+                method,
+                "order.created",
+                "application.order.created",
+                OrderCreated.class
+        );
+        ReactiveRabbitBridgeMessageHandler handler = new ReactiveRabbitBridgeMessageHandler(
+                endpoint,
+                new FailingDeserializeSerializer(deserializeFailure),
+                new ReactiveRabbitBridgeListenerMethodInvoker(),
+                null,
+                Duration.ofHours(24),
+                failureHandler
+        );
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(deserializeFailure);
+        assertThat(listener.invoked()).isFalse();
+        assertThat(failureHandler.failure()).isSameAs(deserializeFailure);
+        assertThat(failureHandler.message()).isNull();
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
     void cancellationDoesNotAckAsSuccess() throws Exception {
         PublicListener listener = new PublicListener(Mono.error(new CancellationException("cancelled")));
         ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle");
@@ -565,6 +598,24 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         @SuppressWarnings("unchecked")
         public <T> ReliableMessage<T> deserialize(byte[] content, Class<T> payloadType) {
             return (ReliableMessage<T>) message;
+        }
+    }
+
+    private static final class FailingDeserializeSerializer implements MessageSerializer {
+        private final RuntimeException failure;
+
+        private FailingDeserializeSerializer(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public <T> byte[] serialize(ReliableMessage<T> message) {
+            throw new UnsupportedOperationException("serialize is not used by listener tests");
+        }
+
+        @Override
+        public <T> ReliableMessage<T> deserialize(byte[] content, Class<T> payloadType) {
+            throw failure;
         }
     }
 

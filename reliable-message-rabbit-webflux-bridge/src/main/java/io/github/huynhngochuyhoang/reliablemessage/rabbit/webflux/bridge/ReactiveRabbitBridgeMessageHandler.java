@@ -110,9 +110,6 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
     }
 
     private void notifyFailure(ReliableMessage<?> reliableMessage, Message message, Throwable failure) {
-        if (reliableMessage == null) {
-            return;
-        }
         try {
             failureHandler.handleFailure(endpoint, reliableMessage, message, failure);
         } catch (RuntimeException | Error hookFailure) {

@@ -72,7 +72,7 @@ public class RabbitWebFluxBridgeAutoConfiguration {
                 serializer,
                 properties,
                 topologyAutoConfigurer,
-                idempotencyStore.getIfAvailable(() -> null),
+                idempotencyStore.getIfAvailable(),
                 failureHandler.getIfAvailable(ReactiveRabbitBridgeFailureHandler::noop)
         );
     }
