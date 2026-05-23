@@ -4,14 +4,14 @@ import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliableListener;
 import org.junit.jupiter.api.Test;
-import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.Exchange;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
 import org.springframework.amqp.rabbit.listener.AbstractMessageListenerContainer;
+import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
+import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.context.support.GenericApplicationContext;
 import reactor.core.publisher.Mono;
 
@@ -19,6 +19,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -69,7 +70,8 @@ class ReactiveRabbitBridgeListenerRegistrarTest {
                 properties
         );
         GenericApplicationContext context = new GenericApplicationContext();
-        context.registerBean("listener", ListenerContract.class, () -> jdkProxy(new ProxiedListener()));
+        ProxiedListener target = new ProxiedListener();
+        context.registerBean("listener", ListenerContract.class, () -> jdkProxy(target));
         context.refresh();
 
         try {
@@ -78,7 +80,11 @@ class ReactiveRabbitBridgeListenerRegistrarTest {
 
             assertThat(registrar.endpoints()).hasSize(1);
             assertThat(registrar.endpoints().getFirst().eventName()).isEqualTo("order.created");
-            assertThat(registrar.endpoints().getFirst().method().getDeclaringClass()).isEqualTo(ProxiedListener.class);
+            ReactiveRabbitBridgeListenerEndpoint endpoint = registrar.endpoints().getFirst();
+            new ReactiveRabbitBridgeListenerMethodInvoker().invoke(endpoint, messageEnvelope()).block();
+
+            assertThat(endpoint.method().getDeclaringClass()).isEqualTo(ListenerContract.class);
+            assertThat(target.invoked()).isTrue();
             assertThat(registrar.containers()).hasSize(1);
         } finally {
             registrar.destroy();
@@ -156,6 +162,20 @@ class ReactiveRabbitBridgeListenerRegistrarTest {
         );
     }
 
+    private static ReliableMessage<OrderCreated> messageEnvelope() {
+        return new ReliableMessage<>(
+                "message-1",
+                "order.created",
+                "order-1",
+                "idempotency-1",
+                "correlation-1",
+                "trace-1",
+                java.time.Instant.parse("2026-05-23T00:00:00Z"),
+                java.util.Map.of(),
+                new OrderCreated("order-1")
+        );
+    }
+
     private static MessageSerializer serializer() {
         return new MessageSerializer() {
             @Override
@@ -213,10 +233,17 @@ class ReactiveRabbitBridgeListenerRegistrarTest {
     }
 
     static final class ProxiedListener implements ListenerContract {
+        private final AtomicBoolean invoked = new AtomicBoolean();
+
         @Override
         @ReactiveReliableListener("order.created")
         public Mono<Void> handle(ReliableMessage<OrderCreated> message) {
+            invoked.set(true);
             return Mono.empty();
+        }
+
+        boolean invoked() {
+            return invoked.get();
         }
     }
 
