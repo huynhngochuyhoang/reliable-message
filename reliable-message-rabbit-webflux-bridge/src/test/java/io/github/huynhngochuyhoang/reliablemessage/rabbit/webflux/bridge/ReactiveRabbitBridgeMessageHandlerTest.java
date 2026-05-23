@@ -101,6 +101,37 @@ class ReactiveRabbitBridgeMessageHandlerTest {
     }
 
     @Test
+    void uncheckedNackFailurePreservesOriginalListenerFailure() throws Exception {
+        IllegalStateException listenerFailure = new IllegalStateException("listener failed");
+        IllegalStateException nackFailure = new IllegalStateException("nack failed");
+        PublicListener listener = new PublicListener(Mono.error(listenerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle");
+        RecordingChannel channel = new RecordingChannel();
+        channel.failNackWith(nackFailure);
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(nackFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).containsExactly(listenerFailure));
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void fatalHandlerErrorNacksBeforeRethrow() throws Exception {
+        AssertionError fatal = new AssertionError("fatal");
+        PublicListener listener = new PublicListener(Mono.error(fatal));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle");
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(fatal);
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+        assertThat(channel.nackMultiple()).isFalse();
+        assertThat(channel.nackRequeue()).isTrue();
+    }
+
+    @Test
     void cancellationDoesNotAckAsSuccess() throws Exception {
         PublicListener listener = new PublicListener(Mono.error(new CancellationException("cancelled")));
         ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle");
@@ -301,6 +332,7 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         private final AtomicReference<Long> ackTimeNanos = new AtomicReference<>();
         private final AtomicReference<Boolean> nackMultiple = new AtomicReference<>();
         private final AtomicReference<Boolean> nackRequeue = new AtomicReference<>();
+        private RuntimeException nackFailure;
 
         Channel proxy() {
             return (Channel) Proxy.newProxyInstance(
@@ -316,6 +348,9 @@ class ReactiveRabbitBridgeMessageHandlerTest {
                             nacked.set(true);
                             nackMultiple.set((Boolean) args[1]);
                             nackRequeue.set((Boolean) args[2]);
+                            if (nackFailure != null) {
+                                throw nackFailure;
+                            }
                             return null;
                         }
                         if (method.getReturnType() == Boolean.TYPE) {
@@ -338,6 +373,10 @@ class ReactiveRabbitBridgeMessageHandlerTest {
 
         long ackTimeNanos() {
             return ackTimeNanos.get();
+        }
+
+        void failNackWith(RuntimeException failure) {
+            this.nackFailure = failure;
         }
 
         boolean nacked() {

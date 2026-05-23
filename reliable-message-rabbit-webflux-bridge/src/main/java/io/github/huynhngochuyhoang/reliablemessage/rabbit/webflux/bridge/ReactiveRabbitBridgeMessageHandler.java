@@ -36,17 +36,17 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
         try {
             ReliableMessage<?> reliableMessage = serializer.deserialize(message.getBody(), endpoint.payloadType());
             awaitHandler(reliableMessage);
-        } catch (RuntimeException error) {
+        } catch (RuntimeException | Error error) {
             nackFailedDelivery(channel, deliveryTag, error);
             throw error;
         }
         channel.basicAck(deliveryTag, false);
     }
 
-    private static void nackFailedDelivery(Channel channel, long deliveryTag, RuntimeException failure) throws IOException {
+    private static void nackFailedDelivery(Channel channel, long deliveryTag, Throwable failure) throws IOException {
         try {
             channel.basicNack(deliveryTag, false, true);
-        } catch (IOException nackFailure) {
+        } catch (IOException | RuntimeException nackFailure) {
             nackFailure.addSuppressed(failure);
             throw nackFailure;
         }
