@@ -67,6 +67,63 @@ class ReactiveRabbitBridgePublisherTest {
     }
 
     @Test
+    void publishFromReactorHttpNioThreadEmitsSafetySignal() throws Exception {
+        RecordingRabbitTemplate rabbitTemplate = new RecordingRabbitTemplate();
+        RecordingSafetyReporter safetyReporter = new RecordingSafetyReporter();
+        ReactiveRabbitBridgePublisher publisher = publisher(
+                rabbitTemplate,
+                new RecordingSerializer(),
+                platformProvider(1, 1),
+                1,
+                safetyReporter
+        );
+
+        runInThread("reactor-http-nio-1", () -> publisher.publish("order.created", new OrderCreated("order-1"), PublishOptions.empty())
+                .block(Duration.ofSeconds(1)));
+
+        assertThat(safetyReporter.threadNames()).containsExactly("reactor-http-nio-1");
+    }
+
+    @Test
+    void publishFromEventLoopThreadStillRunsRabbitTemplateOnBridgeExecutor() throws Exception {
+        RecordingRabbitTemplate rabbitTemplate = new RecordingRabbitTemplate();
+        RecordingSafetyReporter safetyReporter = new RecordingSafetyReporter();
+        ReactiveRabbitBridgePublisher publisher = publisher(
+                rabbitTemplate,
+                new RecordingSerializer(),
+                platformProvider(1, 1),
+                1,
+                safetyReporter
+        );
+
+        runInThread("nioEventLoopGroup-3-1", () -> publisher.publish("order.created", new OrderCreated("order-1"), PublishOptions.empty())
+                .block(Duration.ofSeconds(1)));
+
+        assertThat(rabbitTemplate.threadName())
+                .startsWith("reliable-message-rabbit-bridge-platform-")
+                .isNotEqualTo("nioEventLoopGroup-3-1");
+        assertThat(safetyReporter.threadNames()).containsExactly("nioEventLoopGroup-3-1");
+    }
+
+    @Test
+    void publishFromNormalThreadDoesNotEmitSafetySignal() {
+        RecordingRabbitTemplate rabbitTemplate = new RecordingRabbitTemplate();
+        RecordingSafetyReporter safetyReporter = new RecordingSafetyReporter();
+        ReactiveRabbitBridgePublisher publisher = publisher(
+                rabbitTemplate,
+                new RecordingSerializer(),
+                platformProvider(1, 1),
+                1,
+                safetyReporter
+        );
+
+        publisher.publish("order.created", new OrderCreated("order-1"), PublishOptions.empty())
+                .block(Duration.ofSeconds(1));
+
+        assertThat(safetyReporter.threadNames()).isEmpty();
+    }
+
+    @Test
     void permitReleasedAfterSuccessfulPublish() {
         RecordingRabbitTemplate rabbitTemplate = new RecordingRabbitTemplate();
         ReactiveRabbitBridgePublisher publisher = publisher(rabbitTemplate, new RecordingSerializer(), platformProvider(1, 1), 1);
@@ -157,6 +214,16 @@ class ReactiveRabbitBridgePublisherTest {
                 .doesNotContain("catch (Error");
     }
 
+    @Test
+    void mainSourceDoesNotIntroduceUnboundedQueuePath() throws IOException {
+        String source = mainSources();
+
+        assertThat(source)
+                .doesNotContain("LinkedBlockingQueue")
+                .doesNotContain("newCachedThreadPool")
+                .doesNotContain("newWorkStealingPool");
+    }
+
     private static ReactiveRabbitBridgePublisher publisher(
             RabbitTemplate rabbitTemplate,
             MessageSerializer serializer,
@@ -175,17 +242,58 @@ class ReactiveRabbitBridgePublisherTest {
         );
     }
 
+    private static ReactiveRabbitBridgePublisher publisher(
+            RabbitTemplate rabbitTemplate,
+            MessageSerializer serializer,
+            RabbitBridgeExecutorProvider executorProvider,
+            int maxConcurrency,
+            RabbitBridgeSafetyReporter safetyReporter
+    ) {
+        RabbitWebFluxBridgeProperties properties = new RabbitWebFluxBridgeProperties();
+        properties.getRabbit().setExchange("app.events");
+        return new ReactiveRabbitBridgePublisher(
+                rabbitTemplate,
+                serializer,
+                properties,
+                executorProvider,
+                new RabbitBridgeConcurrencyGuard(maxConcurrency),
+                Clock.fixed(Instant.parse("2026-05-22T00:00:00Z"), ZoneOffset.UTC),
+                new RabbitBridgeEventLoopDetector(),
+                safetyReporter
+        );
+    }
+
+    private static void runInThread(String threadName, ThrowingRunnable task) throws Exception {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread thread = new Thread(() -> {
+            try {
+                task.run();
+            } catch (Throwable error) {
+                failure.set(error);
+            }
+        }, threadName);
+        thread.start();
+        thread.join(TimeUnit.SECONDS.toMillis(2));
+        assertThat(thread.isAlive()).isFalse();
+        if (failure.get() instanceof Exception exception) {
+            throw exception;
+        }
+        if (failure.get() instanceof Error error) {
+            throw error;
+        }
+    }
+
     private static RabbitBridgeExecutorProvider platformProvider(int workerThreads, int queueCapacity) {
         return new TestRabbitBridgeExecutorProvider(workerThreads, queueCapacity);
     }
 
     private static RabbitBridgeExecutorProvider queueProvider(ExecutorService executor) {
         return new RabbitBridgeExecutorProvider() {
-            
+
             public ExecutorService getExecutor() {
                 return executor;
             }
-            
+
             public void close() {
                 executor.shutdownNow();
             }
@@ -355,6 +463,24 @@ class ReactiveRabbitBridgePublisherTest {
         int executeCalls() {
             return executeCalls.get();
         }
+    }
+
+    private static final class RecordingSafetyReporter implements RabbitBridgeSafetyReporter {
+        private final List<String> threadNames = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void eventLoopPublishDetected(String threadName) {
+            threadNames.add(threadName);
+        }
+
+        List<String> threadNames() {
+            return threadNames;
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     record OrderCreated(String orderId) {

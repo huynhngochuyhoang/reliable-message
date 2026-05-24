@@ -207,74 +207,74 @@ Out of scope:
 ## Phase 14.6 Listener Failure, Duplicate, And Idempotency Semantics
 
 Goal:
-- [ ] Add event messaging reliability semantics around reactive Rabbit consume flow.
+- [x] Add event messaging reliability semantics around reactive Rabbit consume flow.
 
 Implementation tasks:
-- [ ] Integrate `ReactiveIdempotencyStore`.
-- [ ] Handle duplicate `SUCCESS` without invoking the handler.
-- [ ] Handle duplicate `PROCESSING` and `FAILED` without acking as success.
-- [ ] Mark success only after handler `Mono` completes.
-- [ ] Mark failure when handler or idempotency flow fails.
-- [ ] Route event failures through Rabbit-native retry and DLQ semantics.
+- [x] Integrate `ReactiveIdempotencyStore`.
+- [x] Handle duplicate `SUCCESS` without invoking the handler.
+- [x] Handle duplicate `PROCESSING` and `FAILED` without acking as success.
+- [x] Mark success only after handler `Mono` completes.
+- [x] Mark failure when handler or idempotency flow fails.
+- [x] Route event failures through Rabbit-native retry and DLQ semantics.
 
 Tests to write first:
-- [ ] New message runs `tryStart`, handler `Mono`, `markSuccess`, then ack.
-- [ ] Duplicate `SUCCESS` acks without invoking handler.
-- [ ] Duplicate `PROCESSING` does not ack as success.
-- [ ] Duplicate `FAILED` does not ack as success.
-- [ ] Handler failure marks failure and does not ack as success.
-- [ ] Idempotency store failure does not silently ack.
-- [ ] Retry exhaustion routes to DLQ using event messaging semantics.
+- [x] New message runs `tryStart`, handler `Mono`, `markSuccess`, then ack.
+- [x] Duplicate `SUCCESS` acks without invoking handler.
+- [x] Duplicate `PROCESSING` does not ack as success.
+- [x] Duplicate `FAILED` does not ack as success.
+- [x] Handler failure marks failure and does not ack as success.
+- [x] Idempotency store failure does not silently ack.
+- [x] Retry exhaustion routes to DLQ using event messaging semantics.
 
 Success criteria:
-- [ ] Duplicate behavior cannot silently lose messages.
-- [ ] Failure behavior is explicit.
-- [ ] Retry and DLQ stay event messaging concerns.
+- [x] Duplicate behavior cannot silently lose messages.
+- [x] Failure behavior is explicit.
+- [x] Retry and DLQ stay event messaging concerns.
 
 Risks:
-- [ ] Reactor retry is mistaken for Rabbit business retry.
-- [ ] Idempotency failure is treated as business success.
-- [ ] Ack/nack behavior conflicts with broker retry configuration.
+- [x] Reactor retry is mistaken for Rabbit business retry.
+- [x] Idempotency failure is treated as business success.
+- [x] Ack/nack behavior conflicts with broker retry configuration.
 
 Out of scope:
-- [ ] RPC.
-- [ ] Outbox integration.
-- [ ] Strategy B async ack coordination.
-- [ ] Advanced observability.
+- [x] RPC.
+- [x] Outbox integration.
+- [x] Strategy B async ack coordination.
+- [x] Advanced observability.
 
 ## Phase 14.7 Event Loop Protection And Overload Behavior
 
 Goal:
-- [ ] Make unsafe bridge usage visible and keep overload behavior bounded.
+- [x] Make unsafe bridge usage visible and keep overload behavior bounded.
 
 Implementation tasks:
-- [ ] Add event-loop detection helper.
-- [ ] Warn or record a safety signal when publish is called from a Reactor HTTP event-loop thread.
-- [ ] Ensure publish is still offloaded to the bridge executor.
-- [ ] Ensure saturation fails fast.
-- [ ] Ensure cancellation releases concurrency resources.
+- [x] Add event-loop detection helper.
+- [x] Warn or record a safety signal when publish is called from a Reactor HTTP event-loop thread.
+- [x] Ensure publish is still offloaded to the bridge executor.
+- [x] Ensure saturation fails fast.
+- [x] Ensure cancellation releases concurrency resources.
 
 Tests to write first:
-- [ ] Publish called from a Reactor HTTP-style thread name emits a warning or safety signal.
-- [ ] Publish called from an event-loop-style thread still offloads blocking work.
-- [ ] Saturated concurrency guard fails fast.
-- [ ] Cancellation releases resources.
-- [ ] No unbounded queue path exists.
+- [x] Publish called from a Reactor HTTP-style thread name emits a warning or safety signal.
+- [x] Publish called from an event-loop-style thread still offloads blocking work.
+- [x] Saturated concurrency guard fails fast.
+- [x] Cancellation releases resources.
+- [x] No unbounded queue path exists.
 
 Success criteria:
-- [ ] Blocking calls remain isolated.
-- [ ] Overload behavior is deterministic.
-- [ ] Safety checks do not change successful business behavior.
+- [x] Blocking calls remain isolated.
+- [x] Overload behavior is deterministic.
+- [x] Safety checks do not change successful business behavior.
 
 Risks:
-- [ ] Thread-name detection is imperfect.
-- [ ] Safety checks become noisy.
-- [ ] Protection logic becomes more complex than the bridge itself.
+- [x] Thread-name detection is imperfect.
+- [x] Safety checks become noisy.
+- [x] Protection logic becomes more complex than the bridge itself.
 
 Out of scope:
-- [ ] BlockHound integration.
-- [ ] Load testing.
-- [ ] Non-fail-fast rejection policies.
+- [x] BlockHound integration.
+- [x] Load testing.
+- [x] Non-fail-fast rejection policies.
 
 ## Phase 14.8 Event Observability
 
