@@ -16,6 +16,7 @@ public class RabbitBridgeMetrics {
     private static final String PUBLISH_TOTAL = "message_rabbit_bridge_publish_total";
     private static final String CONSUME_TOTAL = "message_rabbit_bridge_consume_total";
     private static final String DUPLICATE_TOTAL = "message_rabbit_bridge_duplicate_total";
+    private static final String FAILURE_OUTCOME_TOTAL = "message_rabbit_bridge_failure_outcome_total";
     private static final String EXECUTOR_REJECTED_TOTAL = "message_rabbit_bridge_executor_rejected_total";
     private static final String EXECUTOR_ACTIVE = "message_rabbit_bridge_executor_active";
     private static final String EXECUTOR_QUEUED = "message_rabbit_bridge_executor_queued";
@@ -50,6 +51,10 @@ public class RabbitBridgeMetrics {
 
     public void duplicate(String eventName, String status) {
         increment(DUPLICATE_TOTAL, eventName, status);
+    }
+
+    public void failureOutcome(String eventName, String status) {
+        increment(FAILURE_OUTCOME_TOTAL, eventName, status);
     }
 
     public void executorRejected(String eventName) {

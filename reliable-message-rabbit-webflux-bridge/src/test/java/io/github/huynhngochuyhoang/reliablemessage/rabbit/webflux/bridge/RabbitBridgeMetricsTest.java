@@ -68,6 +68,25 @@ class RabbitBridgeMetricsTest {
     }
 
     @Test
+    void failureOutcomeCountersIncrement() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        RabbitBridgeMetrics metrics = new RabbitBridgeMetrics(meterRegistry, RabbitWebFluxBridgeProperties.ExecutorMode.PLATFORM);
+
+        metrics.failureOutcome("order.created", "retry");
+        metrics.failureOutcome("order.created", "dlq");
+
+        assertThat(counter(meterRegistry, "message_rabbit_bridge_failure_outcome_total", "order.created", "retry")).isEqualTo(1.0);
+        assertThat(counter(meterRegistry, "message_rabbit_bridge_failure_outcome_total", "order.created", "dlq")).isEqualTo(1.0);
+        assertThat(meterRegistry.find("message_rabbit_bridge_failure_outcome_total")
+                .tag("runtime", "webflux-bridge")
+                .tag("transport", "rabbit")
+                .tag("executor_mode", "platform")
+                .tag("event_name", "order.created")
+                .tag("status", "retry")
+                .counter()).isNotNull();
+    }
+
+    @Test
     void exposesPlatformExecutorActiveAndQueuedGaugesWhenAvailable() {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         RabbitBridgeMetrics metrics = new RabbitBridgeMetrics(meterRegistry, RabbitWebFluxBridgeProperties.ExecutorMode.PLATFORM);

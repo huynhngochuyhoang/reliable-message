@@ -284,7 +284,8 @@ Goal:
 Implementation tasks:
 - [x] Add `RabbitBridgeMetrics`.
 - [x] Record publish success and failure.
-- [x] Record consume success, failure, duplicate, retry, and DLQ outcomes.
+- [x] Record consume success, failure, and duplicate outcomes.
+- [x] Record retry and DLQ outcomes when event failure hooks expose concrete outcomes.
 - [x] Record executor active, queued, and rejected counts where available.
 - [x] Tag metrics with `runtime=webflux-bridge`.
 - [x] Tag metrics with `transport=rabbit`.

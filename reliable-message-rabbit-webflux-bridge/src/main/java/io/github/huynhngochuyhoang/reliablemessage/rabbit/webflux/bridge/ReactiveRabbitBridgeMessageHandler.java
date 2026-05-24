@@ -145,10 +145,27 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
 
     private void notifyFailure(ReliableMessage<?> reliableMessage, Message message, Throwable failure) {
         try {
+            if (failureHandler instanceof ReactiveRabbitBridgeFailureOutcomeHandler outcomeHandler) {
+                ReactiveRabbitBridgeFailureOutcome outcome = outcomeHandler.handleFailureWithOutcome(
+                        endpoint,
+                        reliableMessage,
+                        message,
+                        failure
+                );
+                recordFailureOutcome(reliableMessage, outcome);
+                return;
+            }
             failureHandler.handleFailure(endpoint, reliableMessage, message, failure);
         } catch (RuntimeException | Error hookFailure) {
             addSuppressedUnlessSame(failure, hookFailure);
         }
+    }
+
+    private void recordFailureOutcome(ReliableMessage<?> reliableMessage, ReactiveRabbitBridgeFailureOutcome outcome) {
+        if (outcome == null) {
+            return;
+        }
+        metrics.failureOutcome(eventName(reliableMessage), outcome.name().toLowerCase(java.util.Locale.ROOT));
     }
 
     private static void addSuppressedUnlessSame(Throwable failure, Throwable suppressed) {

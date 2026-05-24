@@ -127,6 +127,64 @@ class RabbitBridgeMetricsIntegrationTest {
                 .doesNotContain("ReactiveReliableRpc");
     }
 
+    @Test
+    void retryFailureOutcomeCounterIncrementsAndFailureStillPropagates() throws Exception {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        IllegalStateException failure = new IllegalStateException("handler failed");
+        PublicListener listener = new PublicListener(Mono.error(failure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(
+                listener,
+                null,
+                meterRegistry,
+                failureOutcomeHandler(ReactiveRabbitBridgeFailureOutcome.RETRY)
+        );
+
+        assertThatThrownBy(() -> handler.onMessage(amqpMessage(), channel()))
+                .isSameAs(failure);
+
+        assertThat(counter(meterRegistry, "message_rabbit_bridge_consume_total", "order.created", "failure")).isEqualTo(1.0);
+        assertThat(counter(meterRegistry, "message_rabbit_bridge_failure_outcome_total", "order.created", "retry")).isEqualTo(1.0);
+    }
+
+    @Test
+    void dlqFailureOutcomeCounterIncrementsAndFailureStillPropagates() throws Exception {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        IllegalStateException failure = new IllegalStateException("handler failed");
+        PublicListener listener = new PublicListener(Mono.error(failure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(
+                listener,
+                null,
+                meterRegistry,
+                failureOutcomeHandler(ReactiveRabbitBridgeFailureOutcome.DLQ)
+        );
+
+        assertThatThrownBy(() -> handler.onMessage(amqpMessage(), channel()))
+                .isSameAs(failure);
+
+        assertThat(counter(meterRegistry, "message_rabbit_bridge_failure_outcome_total", "order.created", "dlq")).isEqualTo(1.0);
+    }
+
+    @Test
+    void normalFailureHookDoesNotRecordRetryOrDlqOutcome() throws Exception {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        IllegalStateException failure = new IllegalStateException("handler failed");
+        PublicListener listener = new PublicListener(Mono.error(failure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(
+                listener,
+                null,
+                meterRegistry,
+                (endpoint, reliableMessage, amqpMessage, error) -> {
+                }
+        );
+
+        assertThatThrownBy(() -> handler.onMessage(amqpMessage(), channel()))
+                .isSameAs(failure);
+
+        assertThat(meterRegistry.find("message_rabbit_bridge_failure_outcome_total")
+                .tag("event_name", "order.created")
+                .counter()).isNull();
+    }
+
     private static ReactiveRabbitBridgePublisher publisher(
             RabbitTemplate rabbitTemplate,
             MessageSerializer serializer,
@@ -154,6 +212,15 @@ class RabbitBridgeMetricsIntegrationTest {
             ReactiveIdempotencyStore idempotencyStore,
             SimpleMeterRegistry meterRegistry
     ) throws NoSuchMethodException {
+        return handler(listener, idempotencyStore, meterRegistry, ReactiveRabbitBridgeFailureHandler.noop());
+    }
+
+    private static ReactiveRabbitBridgeMessageHandler handler(
+            PublicListener listener,
+            ReactiveIdempotencyStore idempotencyStore,
+            SimpleMeterRegistry meterRegistry,
+            ReactiveRabbitBridgeFailureHandler failureHandler
+    ) throws NoSuchMethodException {
         Method method = PublicListener.class.getDeclaredMethod("handle", ReliableMessage.class);
         ReactiveRabbitBridgeListenerEndpoint endpoint = new ReactiveRabbitBridgeListenerEndpoint(
                 "listener",
@@ -169,9 +236,15 @@ class RabbitBridgeMetricsIntegrationTest {
                 new ReactiveRabbitBridgeListenerMethodInvoker(),
                 idempotencyStore,
                 Duration.ofHours(24),
-                ReactiveRabbitBridgeFailureHandler.noop(),
+                failureHandler,
                 new RabbitBridgeMetrics(meterRegistry, RabbitWebFluxBridgeProperties.ExecutorMode.PLATFORM)
         );
+    }
+
+    private static ReactiveRabbitBridgeFailureOutcomeHandler failureOutcomeHandler(
+            ReactiveRabbitBridgeFailureOutcome outcome
+    ) {
+        return (endpoint, reliableMessage, amqpMessage, error) -> outcome;
     }
 
     private static Message amqpMessage() {

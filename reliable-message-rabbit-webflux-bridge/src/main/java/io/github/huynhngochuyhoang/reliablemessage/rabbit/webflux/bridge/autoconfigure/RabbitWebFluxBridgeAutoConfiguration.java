@@ -5,7 +5,6 @@ import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.*;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -19,6 +18,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 
 import java.time.Clock;
+import java.util.List;
 
 @AutoConfiguration
 @ConditionalOnClass(RabbitTemplate.class)
@@ -56,8 +56,16 @@ public class RabbitWebFluxBridgeAutoConfiguration {
             RabbitBridgeExecutorProvider executorProvider,
             ObjectProvider<MeterRegistry> meterRegistryProvider
     ) {
+        List<MeterRegistry> registries = meterRegistryProvider.stream().toList();
+        if (registries.isEmpty()) {
+            return RabbitBridgeMetrics.noop();
+        }
+        MeterRegistry meterRegistry = meterRegistryProvider.getIfUnique();
+        if (meterRegistry == null) {
+            throw new IllegalStateException("Multiple MeterRegistry beans found; mark one primary for Rabbit bridge metrics");
+        }
         RabbitBridgeMetrics metrics = new RabbitBridgeMetrics(
-                meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new),
+                meterRegistry,
                 properties.getRabbit().getBridge().getExecutorMode()
         );
         metrics.bindExecutor(executorProvider.getExecutor());

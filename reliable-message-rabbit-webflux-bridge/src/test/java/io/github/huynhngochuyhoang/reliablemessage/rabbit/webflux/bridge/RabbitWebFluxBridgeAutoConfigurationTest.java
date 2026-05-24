@@ -6,6 +6,8 @@ import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.autocon
 import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -14,6 +16,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import reactor.core.publisher.Mono;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
 
@@ -75,6 +78,28 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
                         .hasSingleBean(RabbitBridgeMetrics.class)
                         .hasSingleBean(ReactiveRabbitBridgePublisher.class)
                         .hasSingleBean(ReactiveReliablePublisher.class));
+    }
+
+    @Test
+    void metricsAreNoopWhenNoApplicationMeterRegistryExists() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RabbitBridgeMetrics.class);
+                    assertThat(meterRegistry(context.getBean(RabbitBridgeMetrics.class))).isNull();
+                });
+    }
+
+    @Test
+    void failsFastWhenMultipleMeterRegistriesAreAmbiguous() {
+        contextRunner
+                .withPropertyValues("message.reliability.transport=rabbit")
+                .withBean("firstMeterRegistry", MeterRegistry.class, SimpleMeterRegistry::new)
+                .withBean("secondMeterRegistry", MeterRegistry.class, SimpleMeterRegistry::new)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("MeterRegistry");
+                });
     }
 
     @Test
@@ -151,6 +176,12 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
                 new Class<?>[]{ConnectionFactory.class},
                 (proxy, method, args) -> null
         );
+    }
+
+    private static MeterRegistry meterRegistry(RabbitBridgeMetrics metrics) throws NoSuchFieldException, IllegalAccessException {
+        Field field = RabbitBridgeMetrics.class.getDeclaredField("meterRegistry");
+        field.setAccessible(true);
+        return (MeterRegistry) field.get(metrics);
     }
 
     private static final class RecordingRabbitTemplate extends RabbitTemplate {
