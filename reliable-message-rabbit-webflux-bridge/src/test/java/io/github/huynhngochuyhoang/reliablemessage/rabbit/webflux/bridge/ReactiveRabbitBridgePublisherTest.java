@@ -67,6 +67,24 @@ class ReactiveRabbitBridgePublisherTest {
     }
 
     @Test
+    void publishFromReactorHttpNativeThreadEmitsSafetySignal() throws Exception {
+        RecordingRabbitTemplate rabbitTemplate = new RecordingRabbitTemplate();
+        RecordingSafetyReporter safetyReporter = new RecordingSafetyReporter();
+        ReactiveRabbitBridgePublisher publisher = publisher(
+                rabbitTemplate,
+                new RecordingSerializer(),
+                platformProvider(1, 1),
+                1,
+                safetyReporter
+        );
+
+        runInThread("reactor-http-epoll-1", () -> publisher.publish("order.created", new OrderCreated("order-1"), PublishOptions.empty())
+                .block(Duration.ofSeconds(1)));
+
+        assertThat(safetyReporter.threadNames()).containsExactly("reactor-http-epoll-1");
+    }
+
+    @Test
     void publishFromReactorHttpNioThreadEmitsSafetySignal() throws Exception {
         RecordingRabbitTemplate rabbitTemplate = new RecordingRabbitTemplate();
         RecordingSafetyReporter safetyReporter = new RecordingSafetyReporter();
@@ -274,6 +292,10 @@ class ReactiveRabbitBridgePublisherTest {
         }, threadName);
         thread.start();
         thread.join(TimeUnit.SECONDS.toMillis(2));
+        if (thread.isAlive()) {
+            thread.interrupt();
+            thread.join(TimeUnit.SECONDS.toMillis(1));
+        }
         assertThat(thread.isAlive()).isFalse();
         if (failure.get() instanceof Exception exception) {
             throw exception;

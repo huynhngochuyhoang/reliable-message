@@ -7,7 +7,11 @@ public final class RabbitBridgeEventLoopDetector {
 
     private static final List<String> EVENT_LOOP_THREAD_PATTERNS = List.of(
             "reactor-http-nio",
+            "reactor-http-epoll",
+            "reactor-http-kqueue",
             "reactor-tcp-nio",
+            "reactor-tcp-epoll",
+            "reactor-tcp-kqueue",
             "nioeventloop",
             "epolleventloop",
             "kqueueeventloop"
