@@ -65,7 +65,12 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
             nackFailedDelivery(channel, deliveryTag, error);
             throw error;
         }
-        channel.basicAck(deliveryTag, false);
+        try {
+            channel.basicAck(deliveryTag, false);
+        } catch (IOException error) {
+            notifyFailure(reliableMessage, message, error);
+            throw error;
+        }
     }
 
     private void process(ReliableMessage<?> reliableMessage) {

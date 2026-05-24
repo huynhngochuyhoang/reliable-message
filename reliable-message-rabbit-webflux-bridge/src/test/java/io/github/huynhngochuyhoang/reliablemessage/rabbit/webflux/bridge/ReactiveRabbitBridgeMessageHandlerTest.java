@@ -333,6 +333,24 @@ class ReactiveRabbitBridgeMessageHandlerTest {
     }
 
     @Test
+    void ackFailureInvokesFailureHook() throws Exception {
+        IOException ackFailure = new IOException("ack failed");
+        RecordingFailureHandler failureHandler = new RecordingFailureHandler();
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", null, failureHandler);
+        RecordingChannel channel = new RecordingChannel();
+        channel.failAckWith(ackFailure);
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(ackFailure);
+        assertThat(listener.invoked()).isTrue();
+        assertThat(failureHandler.failure()).isSameAs(ackFailure);
+        assertThat(failureHandler.message()).isEqualTo(messageEnvelope());
+        assertThat(channel.acked()).isTrue();
+        assertThat(channel.nacked()).isFalse();
+    }
+
+    @Test
     void deserializationFailureInvokesFailureHookAndNacks() throws Exception {
         IllegalStateException deserializeFailure = new IllegalStateException("deserialize failed");
         RecordingFailureHandler failureHandler = new RecordingFailureHandler();
@@ -627,6 +645,7 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         private final AtomicReference<Boolean> nackRequeue = new AtomicReference<>();
         private final List<String> events;
         private RuntimeException nackFailure;
+        private IOException ackFailure;
 
         private RecordingChannel() {
             this(null);
@@ -646,6 +665,9 @@ class ReactiveRabbitBridgeMessageHandlerTest {
                             ackTimeNanos.set(System.nanoTime());
                             if (events != null) {
                                 events.add("ack");
+                            }
+                            if (ackFailure != null) {
+                                throw ackFailure;
                             }
                             return null;
                         }
@@ -685,6 +707,10 @@ class ReactiveRabbitBridgeMessageHandlerTest {
 
         void failNackWith(RuntimeException failure) {
             this.nackFailure = failure;
+        }
+
+        void failAckWith(IOException failure) {
+            this.ackFailure = failure;
         }
 
         boolean nacked() {
