@@ -107,6 +107,23 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
     }
 
     @Test
+    void failsFastWhenMultipleFailureHandlersAreAmbiguous() {
+        contextRunner
+                .withPropertyValues(
+                        "message.reliability.transport=rabbit",
+                        "message.reliability.rabbit.listener-auto-startup=false"
+                )
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .withBean(MessageSerializer.class, RecordingSerializer::new)
+                .withBean("firstFailureHandler", ReactiveRabbitBridgeFailureHandler.class, () -> RecordingFailureHandler::handle)
+                .withBean("secondFailureHandler", ReactiveRabbitBridgeFailureHandler.class, () -> RecordingFailureHandler::handle)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("ReactiveRabbitBridgeFailureHandler");
+                });
+    }
+
+    @Test
     void doesNotCreateRabbitAdminWhenOnlyConnectionFactoryExists() {
         contextRunner
                 .withPropertyValues("message.reliability.transport=rabbit")
@@ -167,6 +184,16 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
         @Override
         public Mono<Void> markFailed(String key, Throwable error) {
             return Mono.empty();
+        }
+    }
+
+    private static final class RecordingFailureHandler {
+        private static void handle(
+                ReactiveRabbitBridgeListenerEndpoint endpoint,
+                ReliableMessage<?> reliableMessage,
+                org.springframework.amqp.core.Message amqpMessage,
+                Throwable error
+        ) {
         }
     }
 }

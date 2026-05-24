@@ -73,7 +73,7 @@ public class RabbitWebFluxBridgeAutoConfiguration {
                 properties,
                 topologyAutoConfigurer,
                 idempotencyStore.getIfAvailable(),
-                failureHandler.getIfAvailable(ReactiveRabbitBridgeFailureHandler::noop)
+                failureHandler.getIfAvailable()
         );
     }
 

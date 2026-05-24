@@ -107,9 +107,9 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
         try {
             await(idempotencyStore.markFailed(idempotencyKey, failure));
         } catch (RuntimeException markFailedError) {
-            failure.addSuppressed(markFailedError);
+            addSuppressedUnlessSame(failure, markFailedError);
         } catch (Error markFailedError) {
-            markFailedError.addSuppressed(failure);
+            addSuppressedUnlessSame(markFailedError, failure);
             throw markFailedError;
         }
     }
@@ -118,7 +118,13 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
         try {
             failureHandler.handleFailure(endpoint, reliableMessage, message, failure);
         } catch (RuntimeException | Error hookFailure) {
-            failure.addSuppressed(hookFailure);
+            addSuppressedUnlessSame(failure, hookFailure);
+        }
+    }
+
+    private static void addSuppressedUnlessSame(Throwable failure, Throwable suppressed) {
+        if (failure != suppressed) {
+            failure.addSuppressed(suppressed);
         }
     }
 

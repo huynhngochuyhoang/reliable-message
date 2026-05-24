@@ -290,6 +290,46 @@ class ReactiveRabbitBridgeMessageHandlerTest {
     }
 
     @Test
+    void markFailedSelfSuppressionDoesNotMaskOriginalFailure() throws Exception {
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        idempotencyStore.failMarkFailedWith(handlerFailure);
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).isEmpty());
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void failureHookSelfSuppressionDoesNotMaskOriginalFailureAndNacks() throws Exception {
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        ReactiveRabbitBridgeFailureHandler failureHandler = (endpoint, reliableMessage, amqpMessage, error) -> {
+            throw (RuntimeException) error;
+        };
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore, failureHandler);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).isEmpty());
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
     void retryDlqFailureHookIsInvokedForEventFailureWhenPresent() throws Exception {
         IllegalStateException handlerFailure = new IllegalStateException("handler failed");
         RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
