@@ -3,6 +3,8 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.autoconfigure.RabbitWebFluxBridgeAutoConfiguration;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyStartResult;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -10,8 +12,10 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import reactor.core.publisher.Mono;
 
 import java.lang.reflect.Proxy;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -86,6 +90,40 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
     }
 
     @Test
+    void failsFastWhenMultipleReactiveIdempotencyStoresAreAmbiguous() {
+        contextRunner
+                .withPropertyValues(
+                        "message.reliability.transport=rabbit",
+                        "message.reliability.rabbit.listener-auto-startup=false"
+                )
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .withBean(MessageSerializer.class, RecordingSerializer::new)
+                .withBean("firstIdempotencyStore", ReactiveIdempotencyStore.class, RecordingIdempotencyStore::new)
+                .withBean("secondIdempotencyStore", ReactiveIdempotencyStore.class, RecordingIdempotencyStore::new)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("ReactiveIdempotencyStore");
+                });
+    }
+
+    @Test
+    void failsFastWhenMultipleFailureHandlersAreAmbiguous() {
+        contextRunner
+                .withPropertyValues(
+                        "message.reliability.transport=rabbit",
+                        "message.reliability.rabbit.listener-auto-startup=false"
+                )
+                .withBean(ConnectionFactory.class, RabbitWebFluxBridgeAutoConfigurationTest::connectionFactory)
+                .withBean(MessageSerializer.class, RecordingSerializer::new)
+                .withBean("firstFailureHandler", ReactiveRabbitBridgeFailureHandler.class, () -> RecordingFailureHandler::handle)
+                .withBean("secondFailureHandler", ReactiveRabbitBridgeFailureHandler.class, () -> RecordingFailureHandler::handle)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("ReactiveRabbitBridgeFailureHandler");
+                });
+    }
+
+    @Test
     void doesNotCreateRabbitAdminWhenOnlyConnectionFactoryExists() {
         contextRunner
                 .withPropertyValues("message.reliability.transport=rabbit")
@@ -129,6 +167,33 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
         @Override
         public <T> ReliableMessage<T> deserialize(byte[] content, Class<T> payloadType) {
             throw new UnsupportedOperationException("deserialize is not used by auto-configuration tests");
+        }
+    }
+
+    private static final class RecordingIdempotencyStore implements ReactiveIdempotencyStore {
+        @Override
+        public Mono<IdempotencyStartResult> tryStart(String key, Duration ttl) {
+            return Mono.just(IdempotencyStartResult.startAccepted());
+        }
+
+        @Override
+        public Mono<Void> markSuccess(String key) {
+            return Mono.empty();
+        }
+
+        @Override
+        public Mono<Void> markFailed(String key, Throwable error) {
+            return Mono.empty();
+        }
+    }
+
+    private static final class RecordingFailureHandler {
+        private static void handle(
+                ReactiveRabbitBridgeListenerEndpoint endpoint,
+                ReliableMessage<?> reliableMessage,
+                org.springframework.amqp.core.Message amqpMessage,
+                Throwable error
+        ) {
         }
     }
 }

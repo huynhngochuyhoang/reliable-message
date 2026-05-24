@@ -2,6 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.autoco
 
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.*;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -62,9 +63,18 @@ public class RabbitWebFluxBridgeAutoConfiguration {
             ConnectionFactory connectionFactory,
             MessageSerializer serializer,
             RabbitWebFluxBridgeProperties properties,
-            ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer
+            ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer,
+            ObjectProvider<ReactiveIdempotencyStore> idempotencyStore,
+            ObjectProvider<ReactiveRabbitBridgeFailureHandler> failureHandler
     ) {
-        return new ReactiveRabbitBridgeListenerRegistrar(connectionFactory, serializer, properties, topologyAutoConfigurer);
+        return new ReactiveRabbitBridgeListenerRegistrar(
+                connectionFactory,
+                serializer,
+                properties,
+                topologyAutoConfigurer,
+                idempotencyStore.getIfAvailable(),
+                failureHandler.getIfAvailable()
+        );
     }
 
     @Bean

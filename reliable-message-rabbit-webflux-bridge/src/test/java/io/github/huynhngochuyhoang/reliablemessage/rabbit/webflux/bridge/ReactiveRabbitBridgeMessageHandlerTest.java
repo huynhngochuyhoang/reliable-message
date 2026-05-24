@@ -3,6 +3,9 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 import com.rabbitmq.client.Channel;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyStartResult;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState;
+import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
@@ -17,6 +20,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -132,6 +137,311 @@ class ReactiveRabbitBridgeMessageHandlerTest {
     }
 
     @Test
+    void newMessageRunsTryStartHandlerMarkSuccessThenAck() throws Exception {
+        List<String> events = new ArrayList<>();
+        RecordingOrderListener listener = new RecordingOrderListener(events, Mono.empty());
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                events
+        );
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel(events);
+
+        handler.onMessage(message(), channel.proxy());
+
+        assertThat(events).containsExactly("tryStart", "handler", "markSuccess", "ack");
+        assertThat(idempotencyStore.tryStartKey()).isEqualTo("idempotency-1");
+        assertThat(channel.acked()).isTrue();
+        assertThat(channel.nacked()).isFalse();
+    }
+
+    @Test
+    void markSuccessFailureDoesNotAckAsSuccess() throws Exception {
+        IllegalStateException markSuccessFailure = new IllegalStateException("mark success failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        idempotencyStore.failMarkSuccessWith(markSuccessFailure);
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(markSuccessFailure);
+        assertThat(listener.invoked()).isTrue();
+        assertThat(idempotencyStore.markFailed()).isTrue();
+        assertThat(idempotencyStore.markFailedError()).isSameAs(markSuccessFailure);
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void duplicateSuccessAcksWithoutInvokingHandler() throws Exception {
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.duplicate(IdempotencyState.SUCCESS),
+                new ArrayList<>()
+        );
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        handler.onMessage(message(), channel.proxy());
+
+        assertThat(listener.invoked()).isFalse();
+        assertThat(idempotencyStore.markSuccess()).isFalse();
+        assertThat(channel.acked()).isTrue();
+        assertThat(channel.nacked()).isFalse();
+    }
+
+    @Test
+    void duplicateProcessingDoesNotInvokeHandlerAndDoesNotAckAsSuccess() throws Exception {
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.duplicate(IdempotencyState.PROCESSING),
+                new ArrayList<>()
+        );
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("PROCESSING");
+        assertThat(listener.invoked()).isFalse();
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void duplicateFailedDoesNotInvokeHandlerAndDoesNotAckAsSuccess() throws Exception {
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.duplicate(IdempotencyState.FAILED),
+                new ArrayList<>()
+        );
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("FAILED");
+        assertThat(listener.invoked()).isFalse();
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void handlerFailureCallsMarkFailedAndDoesNotAckAsSuccess() throws Exception {
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure);
+        assertThat(idempotencyStore.markFailed()).isTrue();
+        assertThat(idempotencyStore.markFailedError()).isSameAs(handlerFailure);
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void idempotencyTryStartFailureDoesNotAck() throws Exception {
+        IllegalStateException tryStartFailure = new IllegalStateException("tryStart failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        idempotencyStore.failTryStartWith(tryStartFailure);
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(tryStartFailure);
+        assertThat(listener.invoked()).isFalse();
+        assertThat(idempotencyStore.markFailed()).isFalse();
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void markFailedFailureDoesNotSilentlyAckAsSuccess() throws Exception {
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        IllegalStateException markFailedFailure = new IllegalStateException("mark failed failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        idempotencyStore.failMarkFailedWith(markFailedFailure);
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).contains(markFailedFailure));
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void markFailedSelfSuppressionDoesNotMaskOriginalFailure() throws Exception {
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        idempotencyStore.failMarkFailedWith(handlerFailure);
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).isEmpty());
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void failureHookSelfSuppressionDoesNotMaskOriginalFailureAndNacks() throws Exception {
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        ReactiveRabbitBridgeFailureHandler failureHandler = (endpoint, reliableMessage, amqpMessage, error) -> {
+            throw (RuntimeException) error;
+        };
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore, failureHandler);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).isEmpty());
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void retryDlqFailureHookIsInvokedForEventFailureWhenPresent() throws Exception {
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        RecordingFailureHandler failureHandler = new RecordingFailureHandler();
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore, failureHandler);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure);
+        assertThat(failureHandler.failure()).isSameAs(handlerFailure);
+        assertThat(failureHandler.message()).isEqualTo(messageEnvelope());
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+
+    @Test
+    void failureHookErrorDoesNotBypassNack() throws Exception {
+        AssertionError hookFailure = new AssertionError("hook failed");
+        IllegalStateException handlerFailure = new IllegalStateException("handler failed");
+        RecordingIdempotencyStore idempotencyStore = new RecordingIdempotencyStore(
+                IdempotencyStartResult.startAccepted(),
+                new ArrayList<>()
+        );
+        ReactiveRabbitBridgeFailureHandler failureHandler = (endpoint, reliableMessage, amqpMessage, error) -> {
+            throw hookFailure;
+        };
+        PublicListener listener = new PublicListener(Mono.error(handlerFailure));
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", idempotencyStore, failureHandler);
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(handlerFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).contains(hookFailure));
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
+    void ackFailureInvokesFailureHook() throws Exception {
+        IOException ackFailure = new IOException("ack failed");
+        RecordingFailureHandler failureHandler = new RecordingFailureHandler();
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", null, failureHandler);
+        RecordingChannel channel = new RecordingChannel();
+        channel.failAckWith(ackFailure);
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(ackFailure);
+        assertThat(listener.invoked()).isTrue();
+        assertThat(failureHandler.failure()).isSameAs(ackFailure);
+        assertThat(failureHandler.message()).isEqualTo(messageEnvelope());
+        assertThat(channel.acked()).isTrue();
+        assertThat(channel.nacked()).isFalse();
+    }
+
+    @Test
+    void runtimeAckFailureInvokesFailureHook() throws Exception {
+        IllegalStateException ackFailure = new IllegalStateException("ack failed");
+        RecordingFailureHandler failureHandler = new RecordingFailureHandler();
+        PublicListener listener = new PublicListener(Mono.empty());
+        ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle", null, failureHandler);
+        RecordingChannel channel = new RecordingChannel();
+        channel.failAckWith(ackFailure);
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(ackFailure);
+        assertThat(listener.invoked()).isTrue();
+        assertThat(failureHandler.failure()).isSameAs(ackFailure);
+        assertThat(failureHandler.message()).isEqualTo(messageEnvelope());
+        assertThat(channel.acked()).isTrue();
+        assertThat(channel.nacked()).isFalse();
+    }
+
+    @Test
+    void deserializationFailureInvokesFailureHookAndNacks() throws Exception {
+        IllegalStateException deserializeFailure = new IllegalStateException("deserialize failed");
+        RecordingFailureHandler failureHandler = new RecordingFailureHandler();
+        PublicListener listener = new PublicListener(Mono.empty());
+        Method method = findMethod(listener.getClass(), "handle");
+        ReactiveRabbitBridgeListenerEndpoint endpoint = new ReactiveRabbitBridgeListenerEndpoint(
+                "listener",
+                listener,
+                method,
+                "order.created",
+                "application.order.created",
+                OrderCreated.class
+        );
+        ReactiveRabbitBridgeMessageHandler handler = new ReactiveRabbitBridgeMessageHandler(
+                endpoint,
+                new FailingDeserializeSerializer(deserializeFailure),
+                new ReactiveRabbitBridgeListenerMethodInvoker(),
+                null,
+                Duration.ofHours(24),
+                failureHandler
+        );
+        RecordingChannel channel = new RecordingChannel();
+
+        assertThatThrownBy(() -> handler.onMessage(message(), channel.proxy()))
+                .isSameAs(deserializeFailure);
+        assertThat(listener.invoked()).isFalse();
+        assertThat(failureHandler.failure()).isSameAs(deserializeFailure);
+        assertThat(failureHandler.message()).isNull();
+        assertThat(channel.acked()).isFalse();
+        assertThat(channel.nacked()).isTrue();
+    }
+
+    @Test
     void cancellationDoesNotAckAsSuccess() throws Exception {
         PublicListener listener = new PublicListener(Mono.error(new CancellationException("cancelled")));
         ReactiveRabbitBridgeMessageHandler handler = handler(listener, "handle");
@@ -194,6 +504,8 @@ class ReactiveRabbitBridgeMessageHandlerTest {
 
         assertThat(sources)
                 .doesNotContain("AsyncRabbitTemplate")
+                .doesNotContain("ReactiveReliableRpc")
+                .doesNotContain("Outbox")
                 .doesNotContain("doOnSuccess")
                 .doesNotContain("doOnError")
                 .doesNotContain("subscribe(")
@@ -203,6 +515,23 @@ class ReactiveRabbitBridgeMessageHandlerTest {
     }
 
     private static ReactiveRabbitBridgeMessageHandler handler(Object bean, String methodName) throws Exception {
+        return handler(bean, methodName, null);
+    }
+
+    private static ReactiveRabbitBridgeMessageHandler handler(
+            Object bean,
+            String methodName,
+            ReactiveIdempotencyStore idempotencyStore
+    ) throws Exception {
+        return handler(bean, methodName, idempotencyStore, ReactiveRabbitBridgeFailureHandler.noop());
+    }
+
+    private static ReactiveRabbitBridgeMessageHandler handler(
+            Object bean,
+            String methodName,
+            ReactiveIdempotencyStore idempotencyStore,
+            ReactiveRabbitBridgeFailureHandler failureHandler
+    ) throws Exception {
         Method method = findMethod(bean.getClass(), methodName);
         ReactiveRabbitBridgeListenerEndpoint endpoint = new ReactiveRabbitBridgeListenerEndpoint(
                 "listener",
@@ -212,7 +541,14 @@ class ReactiveRabbitBridgeMessageHandlerTest {
                 "application.order.created",
                 OrderCreated.class
         );
-        return new ReactiveRabbitBridgeMessageHandler(endpoint, new RecordingSerializer(messageEnvelope()), new ReactiveRabbitBridgeListenerMethodInvoker());
+        return new ReactiveRabbitBridgeMessageHandler(
+                endpoint,
+                new RecordingSerializer(messageEnvelope()),
+                new ReactiveRabbitBridgeListenerMethodInvoker(),
+                idempotencyStore,
+                Duration.ofHours(24),
+                failureHandler
+        );
     }
 
     private static Method findMethod(Class<?> type, String methodName) {
@@ -294,6 +630,21 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         }
     }
 
+    private static final class RecordingOrderListener {
+        private final List<String> events;
+        private final Mono<Void> result;
+
+        private RecordingOrderListener(List<String> events, Mono<Void> result) {
+            this.events = events;
+            this.result = result;
+        }
+
+        Mono<Void> handle(ReliableMessage<OrderCreated> message) {
+            events.add("handler");
+            return result;
+        }
+    }
+
     private static final class PrivateListener {
         private final AtomicBoolean invoked = new AtomicBoolean();
 
@@ -326,13 +677,42 @@ class ReactiveRabbitBridgeMessageHandlerTest {
         }
     }
 
+    private static final class FailingDeserializeSerializer implements MessageSerializer {
+        private final RuntimeException failure;
+
+        private FailingDeserializeSerializer(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public <T> byte[] serialize(ReliableMessage<T> message) {
+            throw new UnsupportedOperationException("serialize is not used by listener tests");
+        }
+
+        @Override
+        public <T> ReliableMessage<T> deserialize(byte[] content, Class<T> payloadType) {
+            throw failure;
+        }
+    }
+
     private static final class RecordingChannel {
         private final AtomicBoolean acked = new AtomicBoolean();
         private final AtomicBoolean nacked = new AtomicBoolean();
         private final AtomicReference<Long> ackTimeNanos = new AtomicReference<>();
         private final AtomicReference<Boolean> nackMultiple = new AtomicReference<>();
         private final AtomicReference<Boolean> nackRequeue = new AtomicReference<>();
+        private final List<String> events;
         private RuntimeException nackFailure;
+        private IOException ackIoFailure;
+        private RuntimeException ackRuntimeFailure;
+
+        private RecordingChannel() {
+            this(null);
+        }
+
+        private RecordingChannel(List<String> events) {
+            this.events = events;
+        }
 
         Channel proxy() {
             return (Channel) Proxy.newProxyInstance(
@@ -342,12 +722,24 @@ class ReactiveRabbitBridgeMessageHandlerTest {
                         if (method.getName().equals("basicAck")) {
                             acked.set(true);
                             ackTimeNanos.set(System.nanoTime());
+                            if (events != null) {
+                                events.add("ack");
+                            }
+                            if (ackIoFailure != null) {
+                                throw ackIoFailure;
+                            }
+                            if (ackRuntimeFailure != null) {
+                                throw ackRuntimeFailure;
+                            }
                             return null;
                         }
                         if (method.getName().equals("basicNack")) {
                             nacked.set(true);
                             nackMultiple.set((Boolean) args[1]);
                             nackRequeue.set((Boolean) args[2]);
+                            if (events != null) {
+                                events.add("nack");
+                            }
                             if (nackFailure != null) {
                                 throw nackFailure;
                             }
@@ -379,6 +771,14 @@ class ReactiveRabbitBridgeMessageHandlerTest {
             this.nackFailure = failure;
         }
 
+        void failAckWith(IOException failure) {
+            this.ackIoFailure = failure;
+        }
+
+        void failAckWith(RuntimeException failure) {
+            this.ackRuntimeFailure = failure;
+        }
+
         boolean nacked() {
             return nacked.get();
         }
@@ -389,6 +789,113 @@ class ReactiveRabbitBridgeMessageHandlerTest {
 
         boolean nackRequeue() {
             return Boolean.TRUE.equals(nackRequeue.get());
+        }
+    }
+
+
+    private static final class RecordingIdempotencyStore implements ReactiveIdempotencyStore {
+        private final IdempotencyStartResult startResult;
+        private final List<String> events;
+        private final AtomicBoolean markSuccess = new AtomicBoolean();
+        private final AtomicBoolean markFailed = new AtomicBoolean();
+        private final AtomicReference<String> tryStartKey = new AtomicReference<>();
+        private final AtomicReference<Throwable> markFailedError = new AtomicReference<>();
+        private RuntimeException tryStartFailure;
+        private RuntimeException markSuccessFailure;
+        private RuntimeException markFailedFailure;
+
+        private RecordingIdempotencyStore(IdempotencyStartResult startResult, List<String> events) {
+            this.startResult = startResult;
+            this.events = events;
+        }
+
+        @Override
+        public Mono<IdempotencyStartResult> tryStart(String key, Duration ttl) {
+            return Mono.defer(() -> {
+                events.add("tryStart");
+                tryStartKey.set(key);
+                if (tryStartFailure != null) {
+                    return Mono.error(tryStartFailure);
+                }
+                return Mono.just(startResult);
+            });
+        }
+
+        @Override
+        public Mono<Void> markSuccess(String key) {
+            return Mono.defer(() -> {
+                events.add("markSuccess");
+                markSuccess.set(true);
+                if (markSuccessFailure != null) {
+                    return Mono.error(markSuccessFailure);
+                }
+                return Mono.empty();
+            });
+        }
+
+        @Override
+        public Mono<Void> markFailed(String key, Throwable error) {
+            return Mono.defer(() -> {
+                events.add("markFailed");
+                markFailed.set(true);
+                markFailedError.set(error);
+                if (markFailedFailure != null) {
+                    return Mono.error(markFailedFailure);
+                }
+                return Mono.empty();
+            });
+        }
+
+        void failTryStartWith(RuntimeException failure) {
+            this.tryStartFailure = failure;
+        }
+
+        void failMarkSuccessWith(RuntimeException failure) {
+            this.markSuccessFailure = failure;
+        }
+
+        void failMarkFailedWith(RuntimeException failure) {
+            this.markFailedFailure = failure;
+        }
+
+        String tryStartKey() {
+            return tryStartKey.get();
+        }
+
+        boolean markSuccess() {
+            return markSuccess.get();
+        }
+
+        boolean markFailed() {
+            return markFailed.get();
+        }
+
+        Throwable markFailedError() {
+            return markFailedError.get();
+        }
+    }
+
+    private static final class RecordingFailureHandler implements ReactiveRabbitBridgeFailureHandler {
+        private final AtomicReference<ReliableMessage<?>> message = new AtomicReference<>();
+        private final AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        @Override
+        public void handleFailure(
+                ReactiveRabbitBridgeListenerEndpoint endpoint,
+                ReliableMessage<?> reliableMessage,
+                Message amqpMessage,
+                Throwable error
+        ) {
+            message.set(reliableMessage);
+            failure.set(error);
+        }
+
+        ReliableMessage<?> message() {
+            return message.get();
+        }
+
+        Throwable failure() {
+            return failure.get();
         }
     }
 
