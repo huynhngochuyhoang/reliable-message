@@ -27,6 +27,8 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
     private final RabbitBridgeExecutorProvider executorProvider;
     private final RabbitBridgeConcurrencyGuard concurrencyGuard;
     private final Clock clock;
+    private final RabbitBridgeEventLoopDetector eventLoopDetector;
+    private final RabbitBridgeSafetyReporter safetyReporter;
 
     public ReactiveRabbitBridgePublisher(
             RabbitTemplate rabbitTemplate,
@@ -36,17 +38,42 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
             RabbitBridgeConcurrencyGuard concurrencyGuard,
             Clock clock
     ) {
+        this(
+                rabbitTemplate,
+                serializer,
+                properties,
+                executorProvider,
+                concurrencyGuard,
+                clock,
+                new RabbitBridgeEventLoopDetector(),
+                RabbitBridgeSafetyReporter.logging()
+        );
+    }
+
+    public ReactiveRabbitBridgePublisher(
+            RabbitTemplate rabbitTemplate,
+            MessageSerializer serializer,
+            RabbitWebFluxBridgeProperties properties,
+            RabbitBridgeExecutorProvider executorProvider,
+            RabbitBridgeConcurrencyGuard concurrencyGuard,
+            Clock clock,
+            RabbitBridgeEventLoopDetector eventLoopDetector,
+            RabbitBridgeSafetyReporter safetyReporter
+    ) {
         this.rabbitTemplate = Objects.requireNonNull(rabbitTemplate, "rabbitTemplate");
         this.serializer = Objects.requireNonNull(serializer, "serializer");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.executorProvider = Objects.requireNonNull(executorProvider, "executorProvider");
         this.concurrencyGuard = Objects.requireNonNull(concurrencyGuard, "concurrencyGuard");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.eventLoopDetector = Objects.requireNonNull(eventLoopDetector, "eventLoopDetector");
+        this.safetyReporter = Objects.requireNonNull(safetyReporter, "safetyReporter");
     }
 
     @Override
     public Mono<Void> publish(String eventName, Object payload, PublishOptions options) {
         return Mono.deferContextual(context -> {
+            reportEventLoopCallerIfNeeded(Thread.currentThread());
             PublishOptions contextOptions = ReliableMessageReactorContext.applyTo(
                     options == null ? PublishOptions.empty() : options,
                     context
@@ -55,6 +82,17 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
             Message message = toMessage(reliableMessage);
             return submitPublish(eventName, message);
         });
+    }
+
+    private void reportEventLoopCallerIfNeeded(Thread callerThread) {
+        if (!eventLoopDetector.isEventLoopThread(callerThread)) {
+            return;
+        }
+        try {
+            safetyReporter.eventLoopPublishDetected(callerThread.getName());
+        } catch (RuntimeException ignored) {
+            // Safety reporting must not change publish behavior.
+        }
     }
 
     private Message toMessage(ReliableMessage<Object> reliableMessage) {
