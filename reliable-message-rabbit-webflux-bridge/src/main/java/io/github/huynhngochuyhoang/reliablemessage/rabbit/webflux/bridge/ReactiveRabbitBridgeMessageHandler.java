@@ -28,13 +28,14 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
     private final ReactiveIdempotencyStore idempotencyStore;
     private final Duration idempotencyTtl;
     private final ReactiveRabbitBridgeFailureHandler failureHandler;
+    private final RabbitBridgeMetrics metrics;
 
     public ReactiveRabbitBridgeMessageHandler(
             ReactiveRabbitBridgeListenerEndpoint endpoint,
             MessageSerializer serializer,
             ReactiveRabbitBridgeListenerMethodInvoker invoker
     ) {
-        this(endpoint, serializer, invoker, null, DEFAULT_IDEMPOTENCY_TTL, ReactiveRabbitBridgeFailureHandler.noop());
+        this(endpoint, serializer, invoker, null, DEFAULT_IDEMPOTENCY_TTL, ReactiveRabbitBridgeFailureHandler.noop(), RabbitBridgeMetrics.noop());
     }
 
     public ReactiveRabbitBridgeMessageHandler(
@@ -45,12 +46,25 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
             Duration idempotencyTtl,
             ReactiveRabbitBridgeFailureHandler failureHandler
     ) {
+        this(endpoint, serializer, invoker, idempotencyStore, idempotencyTtl, failureHandler, RabbitBridgeMetrics.noop());
+    }
+
+    public ReactiveRabbitBridgeMessageHandler(
+            ReactiveRabbitBridgeListenerEndpoint endpoint,
+            MessageSerializer serializer,
+            ReactiveRabbitBridgeListenerMethodInvoker invoker,
+            ReactiveIdempotencyStore idempotencyStore,
+            Duration idempotencyTtl,
+            ReactiveRabbitBridgeFailureHandler failureHandler,
+            RabbitBridgeMetrics metrics
+    ) {
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.serializer = Objects.requireNonNull(serializer, "serializer");
         this.invoker = Objects.requireNonNull(invoker, "invoker");
         this.idempotencyStore = idempotencyStore;
         this.idempotencyTtl = idempotencyTtl == null ? DEFAULT_IDEMPOTENCY_TTL : idempotencyTtl;
         this.failureHandler = failureHandler == null ? ReactiveRabbitBridgeFailureHandler.noop() : failureHandler;
+        this.metrics = metrics == null ? RabbitBridgeMetrics.noop() : metrics;
     }
 
     @Override
@@ -61,13 +75,16 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
             reliableMessage = serializer.deserialize(message.getBody(), endpoint.payloadType());
             process(reliableMessage);
         } catch (RuntimeException | Error error) {
+            metrics.consume(eventName(reliableMessage), "failure");
             notifyFailure(reliableMessage, message, error);
             nackFailedDelivery(channel, deliveryTag, error);
             throw error;
         }
         try {
             channel.basicAck(deliveryTag, false);
+            metrics.consume(eventName(reliableMessage), "success");
         } catch (IOException | RuntimeException error) {
+            metrics.consume(eventName(reliableMessage), "failure");
             notifyFailure(reliableMessage, message, error);
             throw error;
         }
@@ -82,6 +99,7 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
         String idempotencyKey = reliableMessage.idempotencyKey();
         IdempotencyStartResult startResult = await(idempotencyStore.tryStart(idempotencyKey, idempotencyTtl));
         if (!startResult.started()) {
+            metrics.duplicate(reliableMessage.eventName(), duplicateStatus(startResult.state()));
             if (startResult.state() == IdempotencyState.SUCCESS) {
                 return;
             }
@@ -95,6 +113,17 @@ public class ReactiveRabbitBridgeMessageHandler implements ChannelAwareMessageLi
             markFailed(idempotencyKey, error);
             throw error;
         }
+    }
+
+    private String eventName(ReliableMessage<?> reliableMessage) {
+        if (reliableMessage != null && reliableMessage.eventName() != null && !reliableMessage.eventName().isBlank()) {
+            return reliableMessage.eventName();
+        }
+        return endpoint.eventName();
+    }
+
+    private static String duplicateStatus(IdempotencyState state) {
+        return state == null ? "unknown" : state.name().toLowerCase(java.util.Locale.ROOT);
     }
 
     private boolean isIdempotencyEnabled(ReliableMessage<?> reliableMessage) {

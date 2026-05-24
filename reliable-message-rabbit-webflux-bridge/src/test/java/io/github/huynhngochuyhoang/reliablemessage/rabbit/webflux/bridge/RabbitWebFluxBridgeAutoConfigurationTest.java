@@ -72,6 +72,7 @@ class RabbitWebFluxBridgeAutoConfigurationTest {
                 .run(context -> assertThat(context)
                         .hasSingleBean(RabbitBridgeExecutorProvider.class)
                         .hasSingleBean(RabbitBridgeConcurrencyGuard.class)
+                        .hasSingleBean(RabbitBridgeMetrics.class)
                         .hasSingleBean(ReactiveRabbitBridgePublisher.class)
                         .hasSingleBean(ReactiveReliablePublisher.class));
     }

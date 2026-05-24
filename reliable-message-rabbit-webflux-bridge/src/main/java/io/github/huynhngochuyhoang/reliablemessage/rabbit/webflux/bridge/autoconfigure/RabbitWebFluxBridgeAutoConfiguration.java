@@ -4,6 +4,8 @@ import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSer
 import io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge.*;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -49,6 +51,21 @@ public class RabbitWebFluxBridgeAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    RabbitBridgeMetrics rabbitBridgeMetrics(
+            RabbitWebFluxBridgeProperties properties,
+            RabbitBridgeExecutorProvider executorProvider,
+            ObjectProvider<MeterRegistry> meterRegistryProvider
+    ) {
+        RabbitBridgeMetrics metrics = new RabbitBridgeMetrics(
+                meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new),
+                properties.getRabbit().getBridge().getExecutorMode()
+        );
+        metrics.bindExecutor(executorProvider.getExecutor());
+        return metrics;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     ReactiveRabbitBridgeTopologyAutoConfigurer reactiveRabbitBridgeTopologyAutoConfigurer(
             ObjectProvider<RabbitAdmin> rabbitAdmin,
             RabbitWebFluxBridgeProperties properties
@@ -65,7 +82,8 @@ public class RabbitWebFluxBridgeAutoConfiguration {
             RabbitWebFluxBridgeProperties properties,
             ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer,
             ObjectProvider<ReactiveIdempotencyStore> idempotencyStore,
-            ObjectProvider<ReactiveRabbitBridgeFailureHandler> failureHandler
+            ObjectProvider<ReactiveRabbitBridgeFailureHandler> failureHandler,
+            RabbitBridgeMetrics metrics
     ) {
         return new ReactiveRabbitBridgeListenerRegistrar(
                 connectionFactory,
@@ -73,7 +91,8 @@ public class RabbitWebFluxBridgeAutoConfiguration {
                 properties,
                 topologyAutoConfigurer,
                 idempotencyStore.getIfAvailable(),
-                failureHandler.getIfAvailable()
+                failureHandler.getIfAvailable(),
+                metrics
         );
     }
 
@@ -86,7 +105,8 @@ public class RabbitWebFluxBridgeAutoConfiguration {
             RabbitWebFluxBridgeProperties properties,
             RabbitBridgeExecutorProvider executorProvider,
             RabbitBridgeConcurrencyGuard concurrencyGuard,
-            Clock clock
+            Clock clock,
+            RabbitBridgeMetrics metrics
     ) {
         return new ReactiveRabbitBridgePublisher(
                 rabbitTemplate,
@@ -94,7 +114,10 @@ public class RabbitWebFluxBridgeAutoConfiguration {
                 properties,
                 executorProvider,
                 concurrencyGuard,
-                clock
+                clock,
+                new RabbitBridgeEventLoopDetector(),
+                RabbitBridgeSafetyReporter.logging(),
+                metrics
         );
     }
 }
