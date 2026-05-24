@@ -279,38 +279,39 @@ Out of scope:
 ## Phase 14.8 Event Observability
 
 Goal:
-- [ ] Add bridge metrics and optional tracing signals for event publish and consume.
+- [x] Add bridge metrics and optional tracing signals for event publish and consume.
 
 Implementation tasks:
-- [ ] Add `RabbitBridgeMetrics`.
-- [ ] Record publish success and failure.
-- [ ] Record consume success, failure, duplicate, retry, and DLQ outcomes.
-- [ ] Record executor active, queued, and rejected counts where available.
-- [ ] Tag metrics with `runtime=webflux-bridge`.
-- [ ] Tag metrics with `transport=rabbit`.
-- [ ] Tag metrics with `executor_mode=platform|virtual-thread`.
+- [x] Add `RabbitBridgeMetrics`.
+- [x] Record publish success and failure.
+- [x] Record consume success, failure, and duplicate outcomes.
+- [x] Record retry and DLQ outcomes when event failure hooks expose concrete outcomes.
+- [x] Record executor active, queued, and rejected counts where available.
+- [x] Tag metrics with `runtime=webflux-bridge`.
+- [x] Tag metrics with `transport=rabbit`.
+- [x] Tag metrics with `executor_mode=platform|virtual-thread`.
 
 Tests to write first:
-- [ ] Publish success counter increments.
-- [ ] Publish failure counter increments.
-- [ ] Consume success counter increments.
-- [ ] Consume failure counter increments.
-- [ ] Duplicate counter increments.
-- [ ] Executor rejection counter increments.
-- [ ] Metrics include bridge runtime and Rabbit transport tags.
+- [x] Publish success counter increments.
+- [x] Publish failure counter increments.
+- [x] Consume success counter increments.
+- [x] Consume failure counter increments.
+- [x] Duplicate counter increments.
+- [x] Executor rejection counter increments.
+- [x] Metrics include bridge runtime and Rabbit transport tags.
 
 Success criteria:
-- [ ] Operators can see bridge saturation and failures.
-- [ ] Metrics do not change business flow.
-- [ ] Metrics wording reflects blocking bridge and hybrid mode.
+- [x] Operators can see bridge saturation and failures.
+- [x] Metrics do not change business flow.
+- [x] Metrics wording reflects blocking bridge and hybrid mode.
 
 Risks:
-- [ ] Metrics duplicate existing observability abstractions.
-- [ ] Queue size gauges differ between platform and virtual-thread modes.
+- [x] Metrics duplicate existing observability abstractions.
+- [x] Queue size gauges differ between platform and virtual-thread modes.
 
 Out of scope:
-- [ ] RPC metrics.
-- [ ] Mandatory distributed tracing dependency.
+- [x] RPC metrics.
+- [x] Mandatory distributed tracing dependency.
 
 ## Phase 14.9 Rabbit RPC WebFlux Bridge Module Scaffold
 

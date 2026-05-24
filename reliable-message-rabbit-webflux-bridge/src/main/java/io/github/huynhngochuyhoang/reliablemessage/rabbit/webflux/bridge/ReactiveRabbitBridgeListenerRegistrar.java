@@ -36,6 +36,7 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
     private final ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer;
     private final ReactiveIdempotencyStore idempotencyStore;
     private final ReactiveRabbitBridgeFailureHandler failureHandler;
+    private final RabbitBridgeMetrics metrics;
     private final List<ReactiveRabbitBridgeListenerEndpoint> endpoints = new ArrayList<>();
     private final List<SimpleMessageListenerContainer> containers = new ArrayList<>();
     private ApplicationContext applicationContext;
@@ -54,7 +55,7 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
             RabbitWebFluxBridgeProperties properties,
             ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer
     ) {
-        this(connectionFactory, serializer, properties, topologyAutoConfigurer, null, ReactiveRabbitBridgeFailureHandler.noop());
+        this(connectionFactory, serializer, properties, topologyAutoConfigurer, null, ReactiveRabbitBridgeFailureHandler.noop(), RabbitBridgeMetrics.noop());
     }
 
     public ReactiveRabbitBridgeListenerRegistrar(
@@ -65,12 +66,25 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
             ReactiveIdempotencyStore idempotencyStore,
             ReactiveRabbitBridgeFailureHandler failureHandler
     ) {
+        this(connectionFactory, serializer, properties, topologyAutoConfigurer, idempotencyStore, failureHandler, RabbitBridgeMetrics.noop());
+    }
+
+    public ReactiveRabbitBridgeListenerRegistrar(
+            ConnectionFactory connectionFactory,
+            MessageSerializer serializer,
+            RabbitWebFluxBridgeProperties properties,
+            ReactiveRabbitBridgeTopologyAutoConfigurer topologyAutoConfigurer,
+            ReactiveIdempotencyStore idempotencyStore,
+            ReactiveRabbitBridgeFailureHandler failureHandler,
+            RabbitBridgeMetrics metrics
+    ) {
         this.connectionFactory = Objects.requireNonNull(connectionFactory, "connectionFactory");
         this.serializer = Objects.requireNonNull(serializer, "serializer");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.topologyAutoConfigurer = Objects.requireNonNull(topologyAutoConfigurer, "topologyAutoConfigurer");
         this.idempotencyStore = idempotencyStore;
         this.failureHandler = failureHandler == null ? ReactiveRabbitBridgeFailureHandler.noop() : failureHandler;
+        this.metrics = metrics == null ? RabbitBridgeMetrics.noop() : metrics;
         this.invoker = new ReactiveRabbitBridgeListenerMethodInvoker();
     }
 
@@ -141,7 +155,8 @@ public class ReactiveRabbitBridgeListenerRegistrar implements SmartInitializingS
                 invoker,
                 idempotencyStore,
                 DEFAULT_IDEMPOTENCY_TTL,
-                failureHandler
+                failureHandler,
+                metrics
         ));
         container.setAutoStartup(properties.getRabbit().isListenerAutoStartup());
         return container;

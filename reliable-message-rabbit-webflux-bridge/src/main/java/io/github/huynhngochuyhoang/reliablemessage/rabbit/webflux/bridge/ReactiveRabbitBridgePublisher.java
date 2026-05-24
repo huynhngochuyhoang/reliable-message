@@ -29,6 +29,7 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
     private final Clock clock;
     private final RabbitBridgeEventLoopDetector eventLoopDetector;
     private final RabbitBridgeSafetyReporter safetyReporter;
+    private final RabbitBridgeMetrics metrics;
 
     public ReactiveRabbitBridgePublisher(
             RabbitTemplate rabbitTemplate,
@@ -46,7 +47,8 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
                 concurrencyGuard,
                 clock,
                 new RabbitBridgeEventLoopDetector(),
-                RabbitBridgeSafetyReporter.logging()
+                RabbitBridgeSafetyReporter.logging(),
+                RabbitBridgeMetrics.noop()
         );
     }
 
@@ -60,6 +62,30 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
             RabbitBridgeEventLoopDetector eventLoopDetector,
             RabbitBridgeSafetyReporter safetyReporter
     ) {
+        this(
+                rabbitTemplate,
+                serializer,
+                properties,
+                executorProvider,
+                concurrencyGuard,
+                clock,
+                eventLoopDetector,
+                safetyReporter,
+                RabbitBridgeMetrics.noop()
+        );
+    }
+
+    public ReactiveRabbitBridgePublisher(
+            RabbitTemplate rabbitTemplate,
+            MessageSerializer serializer,
+            RabbitWebFluxBridgeProperties properties,
+            RabbitBridgeExecutorProvider executorProvider,
+            RabbitBridgeConcurrencyGuard concurrencyGuard,
+            Clock clock,
+            RabbitBridgeEventLoopDetector eventLoopDetector,
+            RabbitBridgeSafetyReporter safetyReporter,
+            RabbitBridgeMetrics metrics
+    ) {
         this.rabbitTemplate = Objects.requireNonNull(rabbitTemplate, "rabbitTemplate");
         this.serializer = Objects.requireNonNull(serializer, "serializer");
         this.properties = Objects.requireNonNull(properties, "properties");
@@ -68,6 +94,7 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
         this.clock = Objects.requireNonNull(clock, "clock");
         this.eventLoopDetector = Objects.requireNonNull(eventLoopDetector, "eventLoopDetector");
         this.safetyReporter = Objects.requireNonNull(safetyReporter, "safetyReporter");
+        this.metrics = metrics == null ? RabbitBridgeMetrics.noop() : metrics;
     }
 
     @Override
@@ -78,8 +105,15 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
                     options == null ? PublishOptions.empty() : options,
                     context
             );
-            ReliableMessage<Object> reliableMessage = toReliableMessage(eventName, payload, contextOptions);
-            Message message = toMessage(reliableMessage);
+            ReliableMessage<Object> reliableMessage;
+            Message message;
+            try {
+                reliableMessage = toReliableMessage(eventName, payload, contextOptions);
+                message = toMessage(reliableMessage);
+            } catch (RuntimeException error) {
+                metrics.publish(eventName, "failure");
+                return Mono.error(error);
+            }
             return submitPublish(eventName, message);
         });
     }
@@ -105,17 +139,27 @@ public class ReactiveRabbitBridgePublisher implements ReactiveReliablePublisher 
     }
 
     private Mono<Void> submitPublish(String eventName, Message message) {
-        return Mono.defer(() -> {
+        return Mono.<Void>defer(() -> {
             CompletableFuture<Void> future;
             try {
                 future = concurrencyGuard.submitFuture(executorProvider.getExecutor(), () -> {
                     publishOnBridgeExecutor(eventName, message);
                     return null;
                 });
+            } catch (RabbitBridgeRejectedException error) {
+                metrics.executorRejected(eventName);
+                metrics.publish(eventName, "failure");
+                return Mono.error(error);
             } catch (RuntimeException error) {
+                metrics.publish(eventName, "failure");
                 return Mono.error(error);
             }
-            return Mono.fromFuture(future);
+            return Mono.fromFuture(future)
+                    .then(Mono.<Void>fromRunnable(() -> metrics.publish(eventName, "success")))
+                    .onErrorMap(error -> {
+                        metrics.publish(eventName, "failure");
+                        return error;
+                    });
         });
     }
 
