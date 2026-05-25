@@ -1,6 +1,24 @@
 # Milestone 14 Rabbit WebFlux Bridge Checklist
 
-This milestone adds RabbitMQ support for WebFlux systems as a blocking bridge, hybrid mode, and migration support. It must not be described as fully reactive RabbitMQ support.
+This milestone adds RabbitMQ support for WebFlux systems as a blocking bridge, hybrid mode, and migration support. It must not be described as native Reactor RabbitMQ support.
+
+## Current Status
+
+- [x] Phase 14.1 through Phase 14.8 define the current implemented event bridge direction.
+- [x] Event publishing uses `RabbitTemplate` through `ReactiveRabbitBridgePublisher`.
+- [x] Event consuming uses Strategy A with ack after handler `Mono` and idempotency success complete.
+- [x] Bridge execution is isolated behind explicit platform or virtual-thread executor modes.
+- [x] Overload behavior is bounded with fail-fast rejection.
+- [x] Bridge metrics use `runtime=webflux-bridge`, `transport=rabbit`, and `executor_mode` tags.
+- [ ] Phase 14.9 and later keep Rabbit RPC in a separate `AsyncRabbitTemplate`-based module.
+- [ ] Phase 14.12 remains the user-facing README and usage documentation pass.
+
+## Implemented Direction
+
+- [x] Keep the event bridge honest as blocking bridge, hybrid mode, and migration support.
+- [x] Treat virtual threads as optimized blocking support, not as reactive RabbitMQ.
+- [x] Keep `ReactiveReliablePublisher` separate from `ReactiveRabbitRpcClient`.
+- [x] Keep event retry/DLQ separate from RPC timeout/retry/circuit-breaker semantics.
 
 ## Global Guardrails
 
@@ -449,7 +467,7 @@ Tests to write first:
 
 Success criteria:
 - [ ] Documentation uses blocking bridge, hybrid mode, and migration support wording.
-- [ ] Documentation does not overclaim full reactive or fully non-blocking RabbitMQ behavior.
+- [ ] Documentation does not overclaim full reactive or non-blocking RabbitMQ broker I/O behavior.
 - [ ] Documentation clearly separates event messaging from RPC.
 
 Risks:
