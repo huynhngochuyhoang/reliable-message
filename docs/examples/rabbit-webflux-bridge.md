@@ -111,6 +111,47 @@ class OrderCreatedListener {
 }
 ```
 
+## Multiple Queue Listeners
+
+Each `@ReactiveReliableListener` method registers a separate listener endpoint. The bridge derives the queue name from `service-name` and the event name:
+
+```text
+queue = {service-name}.{eventName}
+```
+
+With `service-name: order-service`, these listeners consume from separate queues:
+
+```text
+order-service.order.created
+order-service.payment.captured
+order-service.inventory.reserved
+```
+
+```java
+@Component
+class OrderWorkflowListeners {
+
+    @ReactiveReliableListener("order.created")
+    Mono<Void> onOrderCreated(ReliableMessage<OrderCreatedEvent> message) {
+        return orderProjection.create(message.payload());
+    }
+
+    @ReactiveReliableListener("payment.captured")
+    Mono<Void> onPaymentCaptured(ReliableMessage<PaymentCapturedEvent> message) {
+        return billingProjection.markPaid(message.payload());
+    }
+
+    @ReactiveReliableListener("inventory.reserved")
+    Mono<Void> onInventoryReserved(ReliableMessage<InventoryReservedEvent> message) {
+        return fulfillmentWorkflow.start(message.payload());
+    }
+}
+```
+
+Each method must accept one `ReliableMessage<T>` argument and return `Mono<Void>`. Each listener uses Strategy A, manual ack, and prefetch `1`; ack still happens only after that method's `Mono` and `markSuccess` complete successfully.
+
+Topology auto-declare creates and binds each queue when `message.reliability.rabbit.auto-declare=true`. If your broker topology is pre-provisioned, disable auto-declare and create the queues and bindings outside the application.
+
 Current listener strategy is Strategy A:
 
 ```text

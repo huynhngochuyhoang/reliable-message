@@ -161,6 +161,47 @@ class OrderCreatedListener {
 }
 ```
 
+## Multiple Queue Listeners
+
+Register multiple event queues by declaring multiple `@ReactiveReliableListener` methods. The bridge creates one endpoint and listener container per annotated method. Queue names are derived from `service-name` and the event name:
+
+```text
+queue = {service-name}.{eventName}
+```
+
+For `service-name: order-service`:
+
+```java
+@Component
+class OrderWorkflowListeners {
+
+    @ReactiveReliableListener("order.created")
+    Mono<Void> onOrderCreated(ReliableMessage<OrderCreatedEvent> message) {
+        return orderProjection.create(message.payload());
+    }
+
+    @ReactiveReliableListener("payment.captured")
+    Mono<Void> onPaymentCaptured(ReliableMessage<PaymentCapturedEvent> message) {
+        return billingProjection.markPaid(message.payload());
+    }
+
+    @ReactiveReliableListener("inventory.reserved")
+    Mono<Void> onInventoryReserved(ReliableMessage<InventoryReservedEvent> message) {
+        return fulfillmentWorkflow.start(message.payload());
+    }
+}
+```
+
+The resulting queues are:
+
+```text
+order-service.order.created
+order-service.payment.captured
+order-service.inventory.reserved
+```
+
+Each listener container uses manual ack and prefetch `1`. Ack still happens only after that listener method's `Mono` and `markSuccess` complete successfully.
+
 Current listener strategy is Strategy A:
 
 ```text
