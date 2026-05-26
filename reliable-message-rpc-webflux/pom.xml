@@ -51,6 +51,17 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>io.github.huynhngochuyhoang</groupId>
+            <artifactId>reliable-message-outbox-r2dbc</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>

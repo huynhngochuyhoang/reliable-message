@@ -287,6 +287,8 @@ reliable-message-outbox-r2dbc
 reliable-message-idempotency-r2dbc or reliable-message-idempotency-redis-reactive
 ```
 
+R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
+
 Publish:
 
 ```java

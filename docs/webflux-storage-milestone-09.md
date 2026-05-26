@@ -8,7 +8,7 @@ This document describes the completed Milestone 09 reactive storage providers fo
 - `reliable-message-idempotency-r2dbc`
 - `reliable-message-idempotency-redis-reactive`
 
-These modules are opt-in storage providers. They do not add WebFlux Kafka or RabbitMQ transport support.
+These modules are opt-in storage providers. As of Milestone 14.8.1, `reliable-message-outbox-r2dbc` also provides an opt-in reactive outbox flusher that publishes pending rows through the active WebFlux event transport publisher. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
 
 ## R2DBC Outbox
 
