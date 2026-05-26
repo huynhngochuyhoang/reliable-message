@@ -124,6 +124,34 @@ class ReactiveOutboxFlushSchedulerTest {
     }
 
     @Test
+    void longSequentialBatchDoesNotTimeoutWhileMessagesAreProgressing() {
+        List<OutboxMessage> messages = new ArrayList<>();
+        for (int index = 0; index < 40; index++) {
+            messages.add(message("event-" + index));
+        }
+        RecordingOutboxStore store = new RecordingOutboxStore(messages);
+        store.findPendingResult(Flux.<OutboxMessage, Integer>generate(() -> 0, (index, sink) -> {
+            if (index == messages.size()) {
+                sink.complete();
+            } else {
+                sink.next(messages.get(index));
+            }
+            return index + 1;
+        }));
+        RecordingPublisher publisher = new RecordingPublisher();
+        publisher.publishResult(Mono.delay(Duration.ofMillis(5)).then());
+        R2dbcOutboxProperties properties = properties();
+        properties.setPublishTimeout(Duration.ofMillis(50));
+
+        StepVerifier.create(scheduler(store, publisher, properties).flushBatch())
+                .expectNext(40)
+                .verifyComplete();
+
+        assertThat(store.publishedIds()).hasSize(40);
+        assertThat(store.failedIds()).isEmpty();
+    }
+
+    @Test
     void hungMarkPublishedTimesOutAndReleasesRunningGuard() {
         RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
         store.markPublishedResult(Mono.never());

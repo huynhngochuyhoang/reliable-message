@@ -6,6 +6,7 @@ import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePubli
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Clock;
@@ -49,7 +50,9 @@ public class ReactiveOutboxFlushScheduler {
                 return Mono.just(0);
             }
             return outboxStore.findPending(properties.getBatchSize())
+                    .collectList()
                     .timeout(properties.getPublishTimeout())
+                    .flatMapMany(Flux::fromIterable)
                     .concatMap(this::publishAndMark)
                     .reduce(0, Integer::sum)
                     .doFinally(ignored -> running.set(false));
