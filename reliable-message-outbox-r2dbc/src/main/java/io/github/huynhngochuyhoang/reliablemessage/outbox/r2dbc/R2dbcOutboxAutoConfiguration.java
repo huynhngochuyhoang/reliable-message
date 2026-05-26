@@ -54,6 +54,7 @@ public class R2dbcOutboxAutoConfiguration {
 
     @Configuration(proxyBeanMethods = false)
     @EnableScheduling
+    @ConditionalOnBean({ReactiveOutboxStore.class, ReactiveReliablePublisher.class})
     @ConditionalOnProperty(prefix = "message.reliability.outbox", name = "enabled", havingValue = "true")
     @ConditionalOnProperty(prefix = "message.reliability.outbox", name = "flush-enabled", havingValue = "true", matchIfMissing = true)
     static class ReactiveOutboxFlushConfiguration {

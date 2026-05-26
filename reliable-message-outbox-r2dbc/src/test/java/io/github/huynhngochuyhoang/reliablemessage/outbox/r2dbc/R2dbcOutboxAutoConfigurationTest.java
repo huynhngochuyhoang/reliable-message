@@ -10,6 +10,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -77,7 +78,22 @@ class R2dbcOutboxAutoConfigurationTest {
                 .run(context -> assertThat(context)
                         .hasSingleBean(ReactiveOutboxStore.class)
                         .doesNotHaveBean(ReactiveReliablePublisher.class)
-                        .doesNotHaveBean(ReactiveOutboxFlushScheduler.class));
+                        .doesNotHaveBean(ReactiveOutboxFlushScheduler.class)
+                        .doesNotHaveBean(ScheduledAnnotationBeanPostProcessor.class));
+    }
+
+
+    @Test
+    void enablesSchedulingOnlyWhenOutboxFlusherCanBeCreated() {
+        contextRunner
+                .withUserConfiguration(StoreAndPublisherConfig.class)
+                .withPropertyValues(
+                        "message.reliability.outbox.enabled=true",
+                        "message.reliability.outbox.flush-enabled=true"
+                )
+                .run(context -> assertThat(context)
+                        .hasSingleBean(ReactiveOutboxFlushScheduler.class)
+                        .hasSingleBean(ScheduledAnnotationBeanPostProcessor.class));
     }
 
     @Test

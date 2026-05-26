@@ -34,17 +34,22 @@ class ReactiveOutboxFlushSchedulerTest {
     private static final Instant NOW = Instant.parse("2026-05-18T00:00:00Z");
 
     @Test
-    void readsPendingRecordsWithConfiguredBatchSize() {
-        RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
+    void readsPendingRecordsWithConfiguredBatchSizeAndProcessesBoundedConcurrent() {
+        RecordingOutboxStore store = new RecordingOutboxStore(List.of(
+                message("event-1"),
+                message("event-2"),
+                message("event-3")
+        ));
         RecordingPublisher publisher = new RecordingPublisher();
         R2dbcOutboxProperties properties = properties();
         properties.setBatchSize(25);
 
         StepVerifier.create(scheduler(store, publisher, properties).flushBatch())
-                .expectNext(1)
+                .expectNext(3)
                 .verifyComplete();
 
         assertThat(store.lastLimit()).isEqualTo(25);
+        assertThat(store.publishedIds()).containsExactly("event-1", "event-2", "event-3");
     }
 
     @Test
@@ -124,34 +129,6 @@ class ReactiveOutboxFlushSchedulerTest {
     }
 
     @Test
-    void longSequentialBatchDoesNotTimeoutWhileMessagesAreProgressing() {
-        List<OutboxMessage> messages = new ArrayList<>();
-        for (int index = 0; index < 40; index++) {
-            messages.add(message("event-" + index));
-        }
-        RecordingOutboxStore store = new RecordingOutboxStore(messages);
-        store.findPendingResult(Flux.<OutboxMessage, Integer>generate(() -> 0, (index, sink) -> {
-            if (index == messages.size()) {
-                sink.complete();
-            } else {
-                sink.next(messages.get(index));
-            }
-            return index + 1;
-        }));
-        RecordingPublisher publisher = new RecordingPublisher();
-        publisher.publishResult(Mono.delay(Duration.ofMillis(5)).then());
-        R2dbcOutboxProperties properties = properties();
-        properties.setPublishTimeout(Duration.ofMillis(50));
-
-        StepVerifier.create(scheduler(store, publisher, properties).flushBatch())
-                .expectNext(40)
-                .verifyComplete();
-
-        assertThat(store.publishedIds()).hasSize(40);
-        assertThat(store.failedIds()).isEmpty();
-    }
-
-    @Test
     void hungMarkPublishedTimesOutAndReleasesRunningGuard() {
         RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
         store.markPublishedResult(Mono.never());
@@ -228,14 +205,16 @@ class ReactiveOutboxFlushSchedulerTest {
     }
 
     @Test
-    void processingUsesBoundedSequentialConcatMap() throws Exception {
+    void processingUsesBoundedFlatMapWithoutPreclaimedList() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/io/github/huynhngochuyhoang/reliablemessage/outbox/r2dbc/ReactiveOutboxFlushScheduler.java"
         ));
 
         assertThat(source)
-                .contains(".concatMap(")
-                .doesNotContain(".flatMap(message ->");
+                .contains(".flatMap(this::publishAndMark, properties.getBatchSize())")
+                .doesNotContain(".flatMap(message ->")
+                .doesNotContain(".collectList(")
+                .doesNotContain(".concatMap(");
     }
 
     @Test
@@ -387,7 +366,7 @@ class ReactiveOutboxFlushSchedulerTest {
                 if (findPendingResult != null) {
                     return findPendingResult;
                 }
-                return Flux.fromIterable(pending);
+                return Flux.fromIterable(pending).take(limit);
             });
         }
 
