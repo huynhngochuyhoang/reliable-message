@@ -6,6 +6,9 @@ import io.github.huynhngochuyhoang.reliablemessage.webflux.OutboxMessage;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveOutboxStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -25,6 +28,7 @@ import java.util.concurrent.TimeoutException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@ExtendWith(OutputCaptureExtension.class)
 class ReactiveOutboxFlushSchedulerTest {
 
     private static final Instant NOW = Instant.parse("2026-05-18T00:00:00Z");
@@ -97,6 +101,71 @@ class ReactiveOutboxFlushSchedulerTest {
 
         assertThat(store.findPendingCalls()).isEqualTo(2);
         assertThat(store.publishedIds()).containsExactly("event-1");
+    }
+
+    @Test
+    void hungFindPendingTimesOutAndReleasesRunningGuard() {
+        RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
+        store.findPendingResult(Flux.never());
+        RecordingPublisher publisher = new RecordingPublisher();
+        R2dbcOutboxProperties properties = properties();
+        properties.setPublishTimeout(Duration.ofMillis(10));
+        ReactiveOutboxFlushScheduler scheduler = scheduler(store, publisher, properties);
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectError(TimeoutException.class)
+                .verify();
+
+        store.findPendingResult(null);
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectNext(1)
+                .verifyComplete();
+    }
+
+    @Test
+    void hungMarkPublishedTimesOutAndReleasesRunningGuard() {
+        RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
+        store.markPublishedResult(Mono.never());
+        RecordingPublisher publisher = new RecordingPublisher();
+        R2dbcOutboxProperties properties = properties();
+        properties.setPublishTimeout(Duration.ofMillis(10));
+        ReactiveOutboxFlushScheduler scheduler = scheduler(store, publisher, properties);
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectNext(0)
+                .verifyComplete();
+
+        assertThat(store.failedIds()).containsExactly("event-1");
+        assertThat(store.failedErrors()).singleElement().isInstanceOf(TimeoutException.class);
+
+        store.markPublishedResult(null);
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectNext(1)
+                .verifyComplete();
+    }
+
+    @Test
+    void hungMarkFailedTimesOutAndReleasesRunningGuard() {
+        RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
+        store.markFailedResult(Mono.never());
+        RecordingPublisher publisher = new RecordingPublisher();
+        publisher.fail(new IllegalStateException("publish failed"));
+        R2dbcOutboxProperties properties = properties();
+        properties.setPublishTimeout(Duration.ofMillis(10));
+        ReactiveOutboxFlushScheduler scheduler = scheduler(store, publisher, properties);
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectError(TimeoutException.class)
+                .verify();
+
+        store.markFailedResult(null);
+        publisher.publishResult(Mono.empty());
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectNext(1)
+                .verifyComplete();
     }
 
     @Test
@@ -174,6 +243,27 @@ class ReactiveOutboxFlushSchedulerTest {
         probe.assertWasSubscribed();
     }
 
+
+    @Test
+    void scheduledFlushLogsBatchFailures(CapturedOutput output) {
+        ReactiveOutboxFlushScheduler scheduler = new ReactiveOutboxFlushScheduler(
+                new RecordingOutboxStore(List.of()),
+                new RecordingPublisher(),
+                properties(),
+                Clock.fixed(NOW, ZoneOffset.UTC)
+        ) {
+            @Override
+            public Mono<Integer> flushBatch() {
+                return Mono.error(new IllegalStateException("database unavailable"));
+            }
+        };
+
+        scheduler.flush();
+
+        assertThat(output).contains("Reliable message R2DBC outbox flush failed")
+                .contains("database unavailable");
+    }
+
     private static ReactiveOutboxFlushScheduler scheduler(
             ReactiveOutboxStore store,
             ReactiveReliablePublisher publisher,
@@ -244,6 +334,9 @@ class ReactiveOutboxFlushSchedulerTest {
         private final List<String> publishedIds = new ArrayList<>();
         private final List<String> failedIds = new ArrayList<>();
         private final List<Throwable> failedErrors = new ArrayList<>();
+        private Flux<OutboxMessage> findPendingResult;
+        private Mono<Void> markPublishedResult;
+        private Mono<Void> markFailedResult;
         private int lastLimit;
         private int findPendingCalls;
         private Instant nextRetryAt;
@@ -263,26 +356,49 @@ class ReactiveOutboxFlushSchedulerTest {
                 findPendingCalls++;
                 lastLimit = limit;
                 events.add("findPending");
+                if (findPendingResult != null) {
+                    return findPendingResult;
+                }
                 return Flux.fromIterable(pending);
             });
         }
 
         @Override
         public Mono<Void> markPublished(String id) {
-            return Mono.fromRunnable(() -> {
+            return Mono.defer(() -> {
                 events.add("markPublished:" + id);
                 publishedIds.add(id);
+                if (markPublishedResult != null) {
+                    return markPublishedResult;
+                }
+                return Mono.empty();
             });
         }
 
         @Override
         public Mono<Void> markFailed(String id, Throwable error, Instant nextRetryAt) {
-            return Mono.fromRunnable(() -> {
+            return Mono.defer(() -> {
                 events.add("markFailed:" + id);
                 failedIds.add(id);
                 failedErrors.add(error);
                 this.nextRetryAt = nextRetryAt;
+                if (markFailedResult != null) {
+                    return markFailedResult;
+                }
+                return Mono.empty();
             });
+        }
+
+        void findPendingResult(Flux<OutboxMessage> findPendingResult) {
+            this.findPendingResult = findPendingResult;
+        }
+
+        void markPublishedResult(Mono<Void> markPublishedResult) {
+            this.markPublishedResult = markPublishedResult;
+        }
+
+        void markFailedResult(Mono<Void> markFailedResult) {
+            this.markFailedResult = markFailedResult;
         }
 
         List<String> events() {

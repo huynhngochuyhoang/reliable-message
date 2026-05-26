@@ -142,7 +142,7 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
         requireId(id);
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                         update message_outbox
-                        set status = :failed, retry_count = retry_count + 1, next_retry_at = :nextRetryAt,
+                        set status = :failed, retry_count = coalesce(retry_count, 0) + 1, next_retry_at = :nextRetryAt,
                             last_error = :lastError, processing_started_at = null
                         where id = :id and status = :processing
                         """)
