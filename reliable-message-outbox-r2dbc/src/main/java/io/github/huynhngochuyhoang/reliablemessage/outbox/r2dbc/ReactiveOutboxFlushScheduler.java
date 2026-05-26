@@ -50,10 +50,18 @@ public class ReactiveOutboxFlushScheduler {
             }
             return outboxStore.findPending(properties.getBatchSize())
                     .timeout(properties.getPublishTimeout())
-                    .flatMap(this::publishAndMark, properties.getBatchSize())
+                    .flatMap(this::publishAndMarkSafely, properties.getBatchSize())
                     .reduce(0, Integer::sum)
                     .doFinally(ignored -> running.set(false));
         });
+    }
+
+    private Mono<Integer> publishAndMarkSafely(OutboxMessage message) {
+        return publishAndMark(message)
+                .onErrorResume(error -> {
+                    log.warn("Reliable message R2DBC outbox item flush failed: {}", message.id(), error);
+                    return Mono.just(0);
+                });
     }
 
     private Mono<Integer> publishAndMark(OutboxMessage message) {

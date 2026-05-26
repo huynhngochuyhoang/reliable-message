@@ -22,7 +22,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -128,6 +130,7 @@ class ReactiveOutboxFlushSchedulerTest {
                 .verifyComplete();
     }
 
+
     @Test
     void hungMarkPublishedTimesOutAndReleasesRunningGuard() {
         RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
@@ -152,7 +155,7 @@ class ReactiveOutboxFlushSchedulerTest {
     }
 
     @Test
-    void hungMarkFailedTimesOutAndReleasesRunningGuard() {
+    void hungMarkFailedTimesOutWithoutAbortingBatchAndReleasesRunningGuard() {
         RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
         store.markFailedResult(Mono.never());
         RecordingPublisher publisher = new RecordingPublisher();
@@ -162,8 +165,8 @@ class ReactiveOutboxFlushSchedulerTest {
         ReactiveOutboxFlushScheduler scheduler = scheduler(store, publisher, properties);
 
         StepVerifier.create(scheduler.flushBatch())
-                .expectError(TimeoutException.class)
-                .verify();
+                .expectNext(0)
+                .verifyComplete();
 
         store.markFailedResult(null);
         publisher.publishResult(Mono.empty());
@@ -172,6 +175,24 @@ class ReactiveOutboxFlushSchedulerTest {
                 .expectNext(1)
                 .verifyComplete();
     }
+
+    @Test
+    void oneItemFailureDoesNotAbortConcurrentBatchFlush() {
+        RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1"), message("event-2")));
+        store.markPublishedResult("event-1", Mono.error(new IllegalStateException("mark published failed")));
+        store.markFailedResult("event-1", Mono.error(new IllegalStateException("mark failed failed")));
+        RecordingPublisher publisher = new RecordingPublisher();
+        R2dbcOutboxProperties properties = properties();
+        properties.setBatchSize(2);
+
+        StepVerifier.create(scheduler(store, publisher, properties).flushBatch())
+                .expectNext(1)
+                .verifyComplete();
+
+        assertThat(store.failedIds()).containsExactly("event-1");
+        assertThat(store.publishedIds()).containsExactly("event-2");
+    }
+
 
     @Test
     void rejectsNonPositivePublishTimeout() {
@@ -211,7 +232,7 @@ class ReactiveOutboxFlushSchedulerTest {
         ));
 
         assertThat(source)
-                .contains(".flatMap(this::publishAndMark, properties.getBatchSize())")
+                .contains(".flatMap(this::publishAndMarkSafely, properties.getBatchSize())")
                 .doesNotContain(".flatMap(message ->")
                 .doesNotContain(".collectList(")
                 .doesNotContain(".concatMap(");
@@ -344,6 +365,8 @@ class ReactiveOutboxFlushSchedulerTest {
         private Flux<OutboxMessage> findPendingResult;
         private Mono<Void> markPublishedResult;
         private Mono<Void> markFailedResult;
+        private final Map<String, Mono<Void>> markPublishedResultsById = new HashMap<>();
+        private final Map<String, Mono<Void>> markFailedResultsById = new HashMap<>();
         private int lastLimit;
         private int findPendingCalls;
         private Instant nextRetryAt;
@@ -374,11 +397,11 @@ class ReactiveOutboxFlushSchedulerTest {
         public Mono<Void> markPublished(String id) {
             return Mono.defer(() -> {
                 events.add("markPublished:" + id);
-                publishedIds.add(id);
-                if (markPublishedResult != null) {
-                    return markPublishedResult;
+                Mono<Void> result = markPublishedResultsById.getOrDefault(id, markPublishedResult);
+                if (result == null) {
+                    result = Mono.empty();
                 }
-                return Mono.empty();
+                return result.then(Mono.fromRunnable(() -> publishedIds.add(id)));
             });
         }
 
@@ -389,10 +412,11 @@ class ReactiveOutboxFlushSchedulerTest {
                 failedIds.add(id);
                 failedErrors.add(error);
                 this.nextRetryAt = nextRetryAt;
-                if (markFailedResult != null) {
-                    return markFailedResult;
+                Mono<Void> result = markFailedResultsById.getOrDefault(id, markFailedResult);
+                if (result == null) {
+                    result = Mono.empty();
                 }
-                return Mono.empty();
+                return result;
             });
         }
 
@@ -404,8 +428,16 @@ class ReactiveOutboxFlushSchedulerTest {
             this.markPublishedResult = markPublishedResult;
         }
 
+        void markPublishedResult(String id, Mono<Void> markPublishedResult) {
+            this.markPublishedResultsById.put(id, markPublishedResult);
+        }
+
         void markFailedResult(Mono<Void> markFailedResult) {
             this.markFailedResult = markFailedResult;
+        }
+
+        void markFailedResult(String id, Mono<Void> markFailedResult) {
+            this.markFailedResultsById.put(id, markFailedResult);
         }
 
         List<String> events() {
