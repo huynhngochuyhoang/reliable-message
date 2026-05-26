@@ -13,11 +13,7 @@ import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.util.Map;
 import java.util.Objects;
 
@@ -203,12 +199,17 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
                 readPayload(row.get("payload", String.class)),
                 readHeaders(row.get("headers", String.class)),
                 MessageStatus.valueOf(row.get("status", String.class)),
-                row.get("retry_count", Integer.class),
+                retryCount(row),
                 instant(row.get("next_retry_at", LocalDateTime.class)),
                 instant(row.get("created_at", LocalDateTime.class)),
                 instant(row.get("published_at", LocalDateTime.class)),
                 row.get("last_error", String.class)
         );
+    }
+
+    private int retryCount(Row row) {
+        Integer retryCount = row.get("retry_count", Integer.class);
+        return retryCount == null ? 0 : retryCount;
     }
 
     private JsonNode readPayload(String json) {
