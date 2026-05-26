@@ -77,6 +77,106 @@ class R2dbcOutboxStoreTest {
                 .verifyComplete();
     }
 
+    @Test
+    void mapsNullRetryCountAsZeroForLegacyRows() {
+        TestStore testStore = store();
+
+        StepVerifier.create(testStore.databaseClient.sql("""
+                                create table message_outbox (
+                                    id varchar(64) primary key,
+                                    event_name varchar(255) not null,
+                                    aggregate_id varchar(255),
+                                    idempotency_key varchar(255),
+                                    partition_key varchar(255),
+                                    payload text not null,
+                                    headers text,
+                                    status varchar(32) not null,
+                                    retry_count int,
+                                    next_retry_at timestamp,
+                                    processing_started_at timestamp,
+                                    created_at timestamp not null,
+                                    published_at timestamp,
+                                    last_error text
+                                )
+                                """)
+                        .fetch()
+                        .rowsUpdated()
+                        .then(testStore.databaseClient.sql("""
+                                insert into message_outbox
+                                (id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
+                                 status, retry_count, created_at)
+                                values (:id, :eventName, :aggregateId, :idempotencyKey, :partitionKey, :payload, :headers,
+                                        :status, :retryCount, :createdAt)
+                                """)
+                                .bind("id", "event-legacy")
+                                .bind("eventName", "order.created")
+                                .bind("aggregateId", "order-1")
+                                .bind("idempotencyKey", "event-legacy")
+                                .bind("partitionKey", "order-1")
+                                .bind("payload", "{\"orderId\":\"order-1\"}")
+                                .bind("headers", "{}")
+                                .bind("status", MessageStatus.PENDING.name())
+                                .bindNull("retryCount", Integer.class)
+                                .bind("createdAt", NOW.atOffset(ZoneOffset.UTC).toLocalDateTime())
+                                .fetch()
+                                .rowsUpdated())
+                        .thenMany(testStore.store.findPending(10))
+                        .single())
+                .expectNextMatches(message -> message.retryCount() == 0)
+                .verifyComplete();
+    }
+
+    @Test
+    void markFailedIncrementsNullRetryCountForLegacyRows() {
+        TestStore testStore = store();
+
+        StepVerifier.create(testStore.databaseClient.sql("""
+                                create table message_outbox (
+                                    id varchar(64) primary key,
+                                    event_name varchar(255) not null,
+                                    aggregate_id varchar(255),
+                                    idempotency_key varchar(255),
+                                    partition_key varchar(255),
+                                    payload text not null,
+                                    headers text,
+                                    status varchar(32) not null,
+                                    retry_count int,
+                                    next_retry_at timestamp,
+                                    processing_started_at timestamp,
+                                    created_at timestamp not null,
+                                    published_at timestamp,
+                                    last_error text
+                                )
+                                """)
+                        .fetch()
+                        .rowsUpdated()
+                        .then(testStore.databaseClient.sql("""
+                                insert into message_outbox
+                                (id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
+                                 status, retry_count, created_at)
+                                values (:id, :eventName, :aggregateId, :idempotencyKey, :partitionKey, :payload, :headers,
+                                        :status, :retryCount, :createdAt)
+                                """)
+                                .bind("id", "event-legacy")
+                                .bind("eventName", "order.created")
+                                .bind("aggregateId", "order-1")
+                                .bind("idempotencyKey", "event-legacy")
+                                .bind("partitionKey", "order-1")
+                                .bind("payload", "{\"orderId\":\"order-1\"}")
+                                .bind("headers", "{}")
+                                .bind("status", MessageStatus.PENDING.name())
+                                .bindNull("retryCount", Integer.class)
+                                .bind("createdAt", NOW.atOffset(ZoneOffset.UTC).toLocalDateTime())
+                                .fetch()
+                                .rowsUpdated())
+                        .thenMany(testStore.store.findPending(10))
+                        .single()
+                        .flatMap(message -> testStore.store.markFailed(message.id(), new IllegalStateException("publish failed"), NOW.plusSeconds(30)))
+                        .then(retryCount(testStore.databaseClient, "event-legacy")))
+                .expectNext(1)
+                .verifyComplete();
+    }
+
     private static OutboxMessage message(String id) {
         return new OutboxMessage(
                 id,
@@ -105,6 +205,13 @@ class R2dbcOutboxStoreTest {
         return databaseClient.sql("select status from message_outbox where id = :id")
                 .bind("id", id)
                 .map((row, metadata) -> row.get("status", String.class))
+                .one();
+    }
+
+    private static reactor.core.publisher.Mono<Integer> retryCount(DatabaseClient databaseClient, String id) {
+        return databaseClient.sql("select retry_count from message_outbox where id = :id")
+                .bind("id", id)
+                .map((row, metadata) -> row.get("retry_count", Integer.class))
                 .one();
     }
 

@@ -1,16 +1,38 @@
 # Reliable Message Spring Boot - RPC Extension Design
 
-This document describes the optional RPC support phase for the Reliable Message framework.
+This document describes optional RPC support for the Reliable Message framework.
 
-RPC support is intentionally designed as:
-- an optional extension
-- a shared observability and reliability layer
-- NOT a replacement for event-driven messaging
-- NOT a universal transport abstraction
+RPC support is intentionally:
 
----
+```text
+optional
+request/response oriented
+observability and resilience focused
+separate from event messaging
+```
 
-# 1. Goal
+It is not a replacement for event-driven messaging and it is not a universal transport abstraction.
+
+## Current Status
+
+The implemented direction keeps event messaging and RPC separate:
+
+```text
+ReliablePublisher != ReliableRpcClient
+ReactiveReliablePublisher != ReactiveRabbitRpcClient
+```
+
+Rabbit-specific split:
+
+```text
+RabbitTemplate is event messaging only.
+AsyncRabbitTemplate is Rabbit RPC only.
+RPC does not use outbox by default.
+```
+
+Milestone 14 keeps Rabbit event bridge and Rabbit RPC bridge in separate modules.
+
+## 1. Goal
 
 The framework primarily focuses on:
 
@@ -18,101 +40,71 @@ The framework primarily focuses on:
 message reliability
 event-driven systems
 async processing
+effectively-once processing through outbox and idempotency
 ```
 
-However, many production systems still use:
-- HTTP RPC
-- gRPC
-- internal service-to-service calls
-
-This extension provides:
-- tracing
-- correlation propagation
-- retry conventions
-- timeout conventions
-- metrics
-- structured logging
-- circuit breaker integration
-
-for RPC communication.
-
----
-
-# 2. Important Design Principle
-
-Do NOT unify RPC and async messaging into one abstraction.
-
-Avoid designs like:
-
-```java
-messageClient.send(...)
-```
-
-where the implementation might:
-- use Kafka
-- use RabbitMQ
-- use HTTP
-- use gRPC
-
-This creates unclear business semantics.
-
-RPC and async messaging are fundamentally different communication models.
-
----
-
-# 3. Communication Model Difference
-
-## Async Messaging
-
-Characteristics:
+RPC support adds consistent conventions for:
 
 ```text
-fire-and-forget
-eventual consistency
-retry queues
-dead-letter queues
-outbox pattern
-idempotent consumer
-async processing
-```
-
-Examples:
-- RabbitMQ
-- Kafka
-
----
-
-## RPC
-
-Characteristics:
-
-```text
-request-response
-latency sensitive
-timeout sensitive
-synchronous dependency
+tracing
+correlation propagation
+timeout
+retry
 circuit breaker
-connection pooling
-backpressure
+bulkhead
+metrics
+structured logging
+```
+
+for synchronous service-to-service communication.
+
+## 2. Communication Model Difference
+
+### Event Messaging
+
+Event messaging is for eventual consistency.
+
+```text
+fire-and-forget publish
+async consume
+outbox
+idempotent consumer
+broker retry queues or retry topics
+DLQ/DLT
 ```
 
 Examples:
-- HTTP REST
-- gRPC
 
-These two models should remain separate in the framework architecture.
+```text
+RabbitMQ event publish/consume
+Kafka topic publish/consume
+```
 
----
+### RPC
 
-# 4. What SHOULD Be Shared
+RPC is request/response communication.
 
-The following concepts are valuable across both:
-- HTTP
-- gRPC
-- RabbitMQ
-- Kafka
+```text
+caller waits for response or timeout
+latency sensitive
+synchronous dependency
+retry requires idempotency awareness
+circuit breaker and bulkhead are primary resilience controls
+```
 
-## Shared Observability
+Examples:
+
+```text
+HTTP REST
+gRPC
+RabbitMQ request/reply with AsyncRabbitTemplate
+```
+
+These models must remain separate in APIs, modules, metrics and documentation.
+
+## 3. What Can Be Shared
+
+The following concepts are useful across HTTP, gRPC, RabbitMQ RPC, Rabbit events and Kafka events:
 
 ```text
 correlation id
@@ -122,25 +114,11 @@ tenant id
 structured logging
 metrics
 distributed tracing
+common retry policy vocabulary
+common timeout policy vocabulary
 ```
 
-Goal:
-
-```text
-HTTP request
- -> RPC call
- -> publish event
- -> Kafka consume
- -> downstream RPC call
-```
-
-should appear as a single distributed trace.
-
----
-
-## Shared Header Convention
-
-Recommended headers:
+Shared headers:
 
 ```text
 x-correlation-id
@@ -149,84 +127,49 @@ x-trace-id
 x-tenant-id
 ```
 
-Supported across:
-- HTTP
-- gRPC metadata
-- Kafka headers
-- RabbitMQ headers
+Supported carriers:
 
----
+```text
+HTTP headers
+gRPC metadata
+RabbitMQ message properties
+Kafka headers
+```
 
-## Shared Retry Policy Concepts
+Policy concepts may be shared, but implementations remain transport-specific:
 
-Concepts may be shared:
-
-```java
+```text
 RetryPolicy
 TimeoutPolicy
 BackoffPolicy
+ExceptionClassifier
 ```
 
-But implementations must remain transport-specific.
+## 4. What Must Not Be Shared
 
----
-
-# 5. What SHOULD NOT Be Shared
-
-## Do NOT Create Universal Transport APIs
-
-Avoid:
+Do not create a universal transport API such as:
 
 ```java
 transportClient.send(...)
 ```
 
-that magically:
-- switches between Kafka and gRPC
-- hides sync vs async behavior
-- hides delivery guarantees
+that hides whether the call is Kafka, Rabbit event messaging, HTTP, gRPC or Rabbit RPC.
 
-This leads to:
-- unclear semantics
-- debugging complexity
-- broken abstractions
-
----
-
-## Do NOT Pretend RPC Is Event-Driven
-
-This:
+Do not pretend RPC is event-driven:
 
 ```text
-request -> RPC -> response
+request -> wait -> response
 ```
 
-is NOT equivalent to:
+is not equivalent to:
 
 ```text
-publish event -> eventual processing
+publish event -> process eventually
 ```
 
-RPC introduces synchronous dependency and latency coupling.
+Do not use outbox for normal RPC by default. Persisting an RPC request and flushing it later changes it into a durable async command workflow.
 
----
-
-## Do NOT Build a Service Mesh Framework
-
-Avoid scope explosion into:
-- service discovery
-- advanced load balancing
-- full RPC framework
-- orchestration platform
-
-This framework should remain focused on:
-- reliability
-- observability
-- operational consistency
-
----
-
-# 6. MVC RPC Extension
+## 5. MVC RPC Extension
 
 Module:
 
@@ -239,37 +182,22 @@ Target stack:
 ```text
 Spring MVC
 RestClient
-WebClient (blocking usage)
+WebClient in blocking usage only when explicitly chosen
 gRPC blocking stubs
 ```
 
----
-
-## MVC RPC Features
-
-### Retry Convention
-
-```text
-configurable retries
-exponential backoff
-retryable exception classification
-```
-
-### Timeout Convention
+Features:
 
 ```text
 connect timeout
 read timeout
 overall request timeout
+retry with exception classification
+circuit breaker
+bulkhead
+metrics
+trace and correlation propagation
 ```
-
-### Circuit Breaker Integration
-
-Recommended integrations:
-- Resilience4j
-- Spring Retry
-
-### Metrics
 
 Suggested metrics:
 
@@ -279,22 +207,11 @@ rpc_client_failures_total
 rpc_client_duration
 rpc_client_timeout_total
 rpc_client_retry_total
+rpc_client_bulkhead_rejected_total
+rpc_client_circuit_open_total
 ```
 
-### Trace Propagation
-
-Automatically propagate:
-- trace id
-- correlation id
-- request id
-
-through:
-- HTTP headers
-- gRPC metadata
-
----
-
-# 7. WebFlux RPC Extension
+## 6. WebFlux RPC Extension
 
 Module:
 
@@ -311,40 +228,27 @@ reactive gRPC stubs
 Reactor
 ```
 
----
-
-## WebFlux RPC Features
-
-### Reactive Retry
-
-Use Reactor-native retry behavior:
+Rules:
 
 ```text
-retryWhen
-exponential backoff
-retry classification
+preserve Reactor Context
+avoid blocking calls
+avoid block()
+avoid unbounded flatMap
+avoid unbounded queues
 ```
 
-### Reactive Timeout
-
-Support:
+Features:
 
 ```text
-Mono.timeout(...)
+Mono.timeout
+Reactor-native retry composition
+exception classification
+circuit breaker
+bulkhead
+metrics
+trace and correlation propagation
 ```
-
-with standardized timeout conventions.
-
-### Reactor Context Propagation
-
-Preserve:
-- trace id
-- correlation id
-- request id
-
-through Reactor Context.
-
-### Metrics
 
 Suggested metrics:
 
@@ -354,114 +258,166 @@ rpc_reactive_failures_total
 rpc_reactive_duration
 rpc_reactive_timeout_total
 rpc_reactive_retry_total
+rpc_reactive_bulkhead_rejected_total
+rpc_reactive_circuit_open_total
 ```
 
-### Reactive Backpressure Rules
+## 7. Rabbit RPC WebFlux Bridge
+
+Planned module:
 
 ```text
-avoid unbounded flatMap
-respect downstream demand
-avoid blocking calls
-avoid block()
+reliable-message-rpc-rabbit-webflux-bridge
 ```
 
----
-
-# 8. Relationship with Messaging
-
-Recommended production architecture:
-
-## Sync Communication
+This is separate from:
 
 ```text
-HTTP
-gRPC
+reliable-message-rabbit-webflux-bridge
 ```
 
-Used for:
-- queries
-- low-latency operations
-- immediate responses
-- synchronous orchestration
+The event bridge uses `RabbitTemplate`. The RPC bridge uses `AsyncRabbitTemplate`.
 
-## Async Communication
+Primary API:
+
+```java
+public interface ReactiveRabbitRpcClient {
+    <T> Mono<T> request(
+        String route,
+        Object request,
+        Class<T> responseType,
+        RpcOptions options
+    );
+}
+```
+
+Conceptual flow:
 
 ```text
-RabbitMQ
-Kafka
+WebFlux caller
+ -> build RPC request
+ -> AsyncRabbitTemplate convertSendAndReceive
+ -> CompletableFuture
+ -> Mono.fromFuture
+ -> timeout/retry/circuit-breaker/bulkhead
+ -> response or caller-visible failure
 ```
 
-Used for:
-- domain events
-- async jobs
-- decoupled processing
-- eventual consistency
+Example pattern:
 
-## Shared Reliability Layer
+```java
+Mono.fromFuture(() -> asyncRabbitTemplate.convertSendAndReceiveAsType(...))
+    .timeout(options.timeout());
+```
+
+Important boundaries:
 
 ```text
-tracing
-correlation
-metrics
-retry conventions
-observability
+AsyncRabbitTemplate means Rabbit request/reply.
+It is not event publishing.
+It is not outbox-backed messaging.
+It is not native Reactor RabbitMQ.
 ```
 
----
+## 8. RPC Reliability Semantics
 
-# 9. Recommended Roadmap Placement
+RPC outcomes:
 
-RPC support should be added only after:
-- messaging core is stable
-- outbox is stable
-- idempotency is stable
-- observability is stable
-- RabbitMQ support is stable
-- Kafka support is stable
+```text
+success response
+timeout
+remote failure
+reply deserialization failure
+circuit breaker open
+bulkhead rejection
+broker unavailable
+```
+
+RPC retry is request/response retry. It is not Rabbit event retry queue behavior.
+
+Retry risks:
+
+```text
+retrying non-idempotent RPC calls can duplicate downstream side effects
+timeout cancellation may not cancel broker-side or remote work
+remote service may still complete after caller timeout
+```
+
+The framework should make these outcomes visible, not hide them behind event messaging semantics.
+
+## 9. Durable Command Exception
+
+Some commands require durable acceptance.
+
+Examples:
+
+```text
+bank transfer command
+high-value financial command
+legal/compliance command
+```
+
+If the request must survive caller timeout or process restart, do not model it as normal RPC. Model it as durable async command/event workflow:
+
+```text
+save command
+publish command event through event messaging
+return accepted
+process asynchronously
+query status later
+```
+
+That belongs to event messaging and outbox, not normal RPC.
+
+## 10. Relationship With Messaging
+
+Recommended architecture:
+
+```text
+HTTP/gRPC/Rabbit RPC for queries and low-latency request/response
+Rabbit/Kafka event messaging for domain events and async workflows
+```
+
+Shared observability should connect both paths:
+
+```text
+HTTP request
+ -> RPC call
+ -> publish event
+ -> consume event
+ -> downstream RPC call
+```
+
+But the framework must keep semantics separate:
+
+```text
+ReliablePublisher publishes events.
+ReliableRpcClient makes requests.
+ReactiveReliablePublisher publishes reactive events.
+ReactiveRabbitRpcClient makes Rabbit request/reply calls.
+```
+
+## 11. Roadmap Placement
+
+RPC support should remain optional and secondary to message reliability.
 
 Recommended order:
 
 ```text
-1. MVC RabbitMQ
-2. MVC Kafka
-3. WebFlux Kafka
-4. Observability stabilization
-5. Admin tooling stabilization
-6. RPC extension
+1. Stable event messaging core
+2. Stable outbox and idempotency
+3. Stable observability
+4. MVC Rabbit and Kafka
+5. WebFlux Kafka
+6. Rabbit WebFlux blocking bridge for event messaging
+7. Separate Rabbit WebFlux RPC bridge
+8. RPC resilience metrics and hardening
 ```
 
-RPC support should remain:
-- optional
-- secondary
-- reliability-oriented
-
-not the primary framework capability.
-
----
-
-# 10. Final Recommendation
-
-This framework should evolve into:
+Final rule:
 
 ```text
-Distributed communication reliability framework
+Do not merge RPC and event messaging abstractions.
+Do not use AsyncRabbitTemplate for event publishing.
+Do not use outbox for normal RPC by default.
 ```
-
-with:
-- async messaging reliability
-- RPC observability
-- retry conventions
-- trace propagation
-- operational consistency
-
-But the core identity should remain:
-
-```text
-message reliability framework
-```
-
-Avoid:
-- magical transport abstraction
-- fake broker transparency
-- trying to hide sync vs async semantics
-- building a service mesh replacement

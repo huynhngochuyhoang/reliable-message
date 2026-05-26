@@ -15,9 +15,11 @@ It is not an exactly-once messaging framework. It provides the patterns teams us
 
 ## Quick Start
 
-For usage, configuration, and existing-system adoption, start here:
+For architecture diagrams and usage, start here:
 
-[docs/how-to-use.md](docs/how-to-use.md)
+- [Architecture flow](docs/architecture-flow.md)
+- [Usage guide](docs/usage-guide.md)
+- [Rabbit WebFlux blocking bridge](docs/rabbit-webflux-bridge-usage.md)
 
 ## Choose A Stack
 
@@ -26,11 +28,12 @@ For usage, configuration, and existing-system adoption, start here:
 | Spring MVC + RabbitMQ | `reliable-message-mvc-starter` |
 | Spring MVC + Kafka | `reliable-message-mvc-starter` + `reliable-message-kafka-mvc` |
 | Spring WebFlux + Kafka | `reliable-message-webflux-starter` + `reliable-message-kafka-webflux` |
+| Spring WebFlux + RabbitMQ | `reliable-message-rabbit-webflux-bridge` blocking bridge |
 | WebFlux persistence | R2DBC or Reactive Redis modules |
 | RPC propagation | `reliable-message-rpc-mvc` or `reliable-message-rpc-webflux` |
 | Audit logging | `reliable-message-audit-mvc` or `reliable-message-audit-webflux` |
 
-RabbitMQ is production-oriented for MVC. WebFlux services should use Kafka today; WebFlux RabbitMQ is documented as future/experimental research, not stable support.
+RabbitMQ is production-oriented for MVC. WebFlux services should prefer Kafka for reactive messaging. If a WebFlux service must use RabbitMQ, use the Rabbit WebFlux blocking bridge as hybrid mode and migration support; it is not native Reactor RabbitMQ.
 
 ## MVC Example
 
@@ -109,6 +112,7 @@ Transports:
 - `reliable-message-rabbit-mvc`
 - `reliable-message-kafka-mvc`
 - `reliable-message-kafka-webflux`
+- `reliable-message-rabbit-webflux-bridge`
 
 Storage:
 
@@ -132,13 +136,14 @@ Operations and extensions:
 
 ## Documentation
 
-- [How to use](docs/how-to-use.md)
+- [Architecture flow](docs/architecture-flow.md)
+- [Usage guide](docs/usage-guide.md)
+- [Rabbit WebFlux blocking bridge](docs/rabbit-webflux-bridge-usage.md)
 - [MVC RabbitMQ](docs/mvc-rabbit-milestone-01-06.md)
 - [MVC Kafka](docs/mvc-kafka-milestone-07.md)
 - [WebFlux core](docs/webflux-core-milestone-08.md)
 - [WebFlux storage](docs/webflux-storage-milestone-09.md)
 - [WebFlux Kafka](docs/webflux-kafka-milestone-10.md)
-- [WebFlux Rabbit research](docs/webflux-rabbit-research-milestone-11.md)
 - [RPC extension](docs/rpc-extension-milestone-12.md)
 - [Audit extension](docs/audit-extension-milestone-13.md)
 - [Roadmap plans](plans/README.md)

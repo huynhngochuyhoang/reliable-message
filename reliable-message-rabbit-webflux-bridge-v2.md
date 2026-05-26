@@ -6,210 +6,229 @@ This document describes the supported hybrid mode for:
 Spring WebFlux + RabbitMQ + Spring AMQP
 ```
 
-This is NOT fully reactive RabbitMQ support.
+This is not native Reactor RabbitMQ support and not non-blocking RabbitMQ broker I/O support.
 
-This design exists because:
-- many real production systems already use WebFlux
-- RabbitMQ infrastructure already exists
-- Spring AMQP remains the dominant RabbitMQ integration in Spring
-- no stable Reactor-native RabbitMQ ecosystem currently exists
-- Java 21 virtual threads make blocking bridge execution more practical
-
-This module should be positioned as:
+Positioning:
 
 ```text
-legacy support
-migration support
-hybrid mode
 blocking bridge
+hybrid mode
+migration support
+virtual-thread optimized blocking support
 ```
 
-NOT:
+Non-goals:
 
 ```text
-fully reactive RabbitMQ
+native Reactor RabbitMQ
+non-blocking RabbitMQ broker I/O
+unlimited concurrency
+hiding Spring AMQP blocking behavior
 ```
 
----
+## Current Status
 
-# 1. Why This Exists
+Milestone 14 event bridge direction is implemented through phases 14.1 to 14.8:
 
-Many systems today look like:
+```text
+module scaffold and properties
+bridge executor abstraction
+platform and virtual-thread executor modes
+bounded concurrency guard
+fail-fast rejection
+ReactiveRabbitBridgePublisher
+Strategy A listener bridge
+ack after handler Mono and markSuccess complete
+ReactiveIdempotencyStore duplicate semantics
+event-loop safety warning/signal
+bridge observability
+```
+
+Rabbit RPC is intentionally separate and planned for later phases:
+
+```text
+reliable-message-rpc-rabbit-webflux-bridge
+ReactiveRabbitRpcClient
+AsyncRabbitTemplate request/reply
+Mono.fromFuture
+RPC timeout/retry/circuit-breaker/bulkhead
+```
+
+## 1. Why This Exists
+
+Many systems use:
 
 ```text
 Spring WebFlux HTTP APIs
 +
-RabbitMQ messaging via Spring AMQP
+RabbitMQ messaging through Spring AMQP
 ```
 
 Reasons:
-- historical architecture
-- organization-wide RabbitMQ adoption
-- operational familiarity
-- migration constraints
-- no approved Kafka platform
-- existing Rabbit topology and tooling
-
-In practice, teams often:
-- use WebFlux for HTTP
-- still use RabbitTemplate
-- still use Spring AMQP listener containers
-
-This framework should support that reality honestly.
-
----
-
-# 2. Important Positioning
-
-This module is:
 
 ```text
-WebFlux + blocking Rabbit bridge
+existing RabbitMQ platform
+organization-wide RabbitMQ tooling
+migration constraints
+operational familiarity
+no approved Kafka platform
 ```
 
-NOT:
+The framework supports this reality honestly by isolating blocking Rabbit work instead of pretending Spring AMQP is reactive.
 
-```text
-fully non-blocking RabbitMQ support
-```
+## 2. Module Boundary
 
-The framework must not pretend that:
-- RabbitTemplate is reactive
-- Spring AMQP listener containers are reactive
-- wrapping blocking calls in Mono magically makes them non-blocking
-- virtual threads make blocking I/O reactive
-
-Instead:
-- isolate blocking work
-- protect event loop threads
-- optionally use Java 21 virtual threads for blocking work
-- document limitations clearly
-- provide operational consistency
-
----
-
-# 3. Module Name
-
-Recommended module:
+Event bridge module:
 
 ```text
 reliable-message-rabbit-webflux-bridge
 ```
 
-Do NOT use:
+Use for:
 
 ```text
-reliable-message-rabbit-webflux
+event publish
+event consume
+RabbitTemplate
+Rabbit listener containers
+idempotency
+ack/nack
+Rabbit-native retry/DLQ hooks
+bridge metrics
 ```
 
-because that name incorrectly suggests fully reactive RabbitMQ support.
+Do not use for:
 
----
+```text
+RPC request/reply
+AsyncRabbitTemplate
+normal RPC timeout/circuit-breaker semantics
+outbox-backed RPC
+```
 
-# 4. Recommended Stack
+Planned RPC bridge module:
+
+```text
+reliable-message-rpc-rabbit-webflux-bridge
+```
+
+Use for:
+
+```text
+ReactiveRabbitRpcClient
+AsyncRabbitTemplate
+request/reply
+Mono.fromFuture
+timeout/retry/circuit-breaker/bulkhead
+```
+
+Hard rule:
+
+```text
+RabbitTemplate belongs to event messaging.
+AsyncRabbitTemplate belongs to Rabbit RPC.
+```
+
+## 3. Runtime Model
+
+Recommended stack:
 
 ```text
 Spring WebFlux
 Spring AMQP
 RabbitTemplate
 SimpleMessageListenerContainer
-Reactive Redis
-R2DBC
+Reactive Redis or R2DBC idempotency
 Java 21 virtual threads optional
 Micrometer
-OpenTelemetry
+OpenTelemetry where configured
 ```
 
-This creates a hybrid runtime:
+Hybrid runtime:
 
 ```text
 Reactive HTTP layer
-Blocking RabbitMQ layer
+Reactive business APIs
+Blocking RabbitMQ layer isolated by bridge executor/listener boundary
 ```
-
-The framework responsibility is:
-- isolate blocking boundaries
-- preserve observability
-- preserve reliability guarantees
-- prevent blocking work from reaching Netty event loop threads
-
----
-
-# 5. Main Principle
 
 Critical rule:
 
 ```text
-Never execute blocking RabbitMQ work on Netty event loop threads.
+Never execute blocking RabbitMQ work on Netty event-loop threads.
 ```
 
-Blocking Rabbit operations must run on one of:
+Blocking Rabbit operations must run on:
 
 ```text
-dedicated listener threads
-dedicated bounded platform thread pool
-dedicated virtual thread executor
-dedicated scheduler backed by controlled executor
+Spring AMQP listener threads
+dedicated bounded platform thread executor
+dedicated virtual-thread executor with bounded submission/concurrency
+dedicated scheduler backed by the bridge executor
 ```
 
----
+## 4. Configuration Direction
 
-# 6. Java 21 Virtual Thread Support
-
-Java 21 virtual threads are a strong fit for this bridge because RabbitMQ Spring AMQP operations are blocking I/O.
-
-Virtual threads can reduce the cost of blocking compared to a traditional platform thread pool.
-
-Recommended support:
-
-```text
-platform-thread-pool
-virtual-thread
-```
-
-Config:
+Example platform mode:
 
 ```yaml
 message:
   reliability:
+    runtime: webflux
+    transport: rabbit
+    service-name: order-service
     rabbit:
+      exchange: app.events
+      auto-declare: true
       bridge:
-        executor-mode: virtual-thread # platform | virtual-thread
-        max-concurrency: 1000
-        queue-capacity: 10000
+        enabled: true
+        executor-mode: platform
+        worker-threads: 16
+        queue-capacity: 1000
+        max-concurrency: 256
+        rejection-policy: fail-fast
 ```
 
-Important:
+Example virtual-thread mode:
+
+```yaml
+message:
+  reliability:
+    runtime: webflux
+    transport: rabbit
+    service-name: order-service
+    rabbit:
+      exchange: app.events
+      bridge:
+        enabled: true
+        executor-mode: virtual-thread
+        max-concurrency: 1000
+        queue-capacity: 1000
+        rejection-policy: fail-fast
+```
+
+First-version rejection policy:
 
 ```text
-virtual threads improve blocking scalability
-virtual threads do not make RabbitTemplate reactive
-virtual threads do not remove the need for concurrency limits
-virtual threads do not replace backpressure
+fail-fast only
 ```
 
-Use virtual threads for:
-- blocking RabbitTemplate publish
-- blocking wait for reactive handler completion in bridge mode
-- blocking audit sink only if explicitly configured for MVC/blocking style
+Out of first-version scope:
 
-Do not use virtual threads for:
-- Netty event loop
-- Reactor operator execution by default
-- CPU-heavy work
-- unbounded concurrency
+```text
+block-caller
+drop-and-metric
+unbounded queues
+unbounded submission
+```
 
----
+## 5. Executor and Scheduler
 
-# 7. Executor Strategy
-
-The bridge should provide an abstraction:
+Core abstraction:
 
 ```java
 public interface RabbitBridgeExecutorProvider {
-
-    ExecutorService getExecutor();
-
+    ExecutorService executor();
 }
 ```
 
@@ -220,94 +239,76 @@ PlatformThreadRabbitBridgeExecutorProvider
 VirtualThreadRabbitBridgeExecutorProvider
 ```
 
-Java 21 virtual thread implementation:
-
-```java
-Executors.newVirtualThreadPerTaskExecutor()
-```
-
-Platform thread implementation:
-
-```java
-ThreadPoolExecutor
-```
-
-Recommended default:
+Platform mode:
 
 ```text
-platform-thread-pool
+bounded worker count
+bounded queue capacity
+clear bridge thread names
+graceful shutdown
+fail-fast rejection when saturated
 ```
 
-Recommended for Java 21 deployments:
+Virtual-thread mode:
 
 ```text
-virtual-thread
+named virtual threads
+bounded submission before work is accepted
+external concurrency guard still required
+graceful shutdown
 ```
 
-But only when:
-- the team understands blocking semantics
-- concurrency limits are configured
-- metrics are monitored
+Virtual thread semantics:
 
----
+```text
+virtual threads reduce blocking cost
+virtual threads are not reactive
+virtual threads do not remove backpressure concerns
+virtual threads still need concurrency limits
+```
 
-# 8. Concurrency Guard
+Do not use:
 
-Even with virtual threads, the framework must enforce concurrency limits.
+```text
+Netty event loop
+Reactor parallel scheduler by default
+ForkJoinPool.commonPool
+unbounded platform queue
+```
 
-Reason:
-- RabbitMQ connections/channels are finite
-- downstream services are finite
-- database pools are finite
-- Redis connections are finite
-- memory is finite
-- broker can be overloaded
+## 6. Concurrency Guard
 
-Use a semaphore/bulkhead:
+Core components:
 
-```java
-Semaphore maxConcurrency
+```text
+RabbitBridgeConcurrencyGuard
+RabbitBridgeRejectedException
 ```
 
 Flow:
 
 ```text
-acquire permit
- -> execute blocking Rabbit work on executor
- -> release permit
+acquire permit before submission
+ -> submit blocking bridge work
+ -> release permit on success, failure, cancellation or executor rejection
 ```
 
 If concurrency is exhausted:
 
 ```text
-fail fast
-queue with bounded capacity
-or apply configured rejection policy
+fail fast with RabbitBridgeRejectedException
 ```
 
-Config:
-
-```yaml
-message:
-  reliability:
-    rabbit:
-      bridge:
-        max-concurrency: 1000
-        queue-capacity: 10000
-        rejection-policy: fail-fast # fail-fast | block-caller | drop-and-metric
-```
-
-Recommended default:
+The guard prevents:
 
 ```text
-fail-fast
+unbounded RabbitTemplate publishes
+unbounded virtual-thread submissions
+unbounded queued bridge work
+resource exhaustion under slow broker or downstream outage
 ```
 
-Do not allow unbounded queues.
-
----
-
-# 9. Reactive Publisher Bridge
+## 7. Reactive Event Publisher Bridge
 
 Main component:
 
@@ -319,450 +320,228 @@ API:
 
 ```java
 public interface ReactiveReliablePublisher {
-
-    Mono<Void> publish(
-        String eventName,
-        Object payload,
-        PublishOptions options
-    );
+    Mono<Void> publish(String eventName, Object payload, PublishOptions options);
 }
 ```
 
-Implementation:
+Publish flow:
 
 ```text
-ReactiveReliablePublisher
+subscriber calls publish Mono
+ -> serialize ReliableMessage before Rabbit execution
  -> acquire concurrency permit
- -> offload RabbitTemplate publish
- -> dedicated executor
+ -> submit RabbitTemplate.convertAndSend to bridge executor
+ -> RabbitTemplate runs on bridge thread only
+ -> record success/failure metrics
  -> release permit
- -> return Mono<Void>
-```
-
-Conceptual implementation:
-
-```java
-Mono.fromRunnable(() ->
-    rabbitTemplate.convertAndSend(...)
-)
-.subscribeOn(rabbitBridgeScheduler);
-```
-
-If virtual threads are enabled:
-
-```text
-rabbitBridgeScheduler is backed by a virtual-thread executor
+ -> complete or error the Mono
 ```
 
 Important:
 
 ```text
-Rabbit publish remains blocking internally.
+RabbitTemplate remains blocking.
+Mono provides composition and an explicit offload boundary.
+Mono does not make RabbitTemplate non-blocking.
 ```
 
-The Mono only provides:
-- reactive composition
-- async boundary
-- non-event-loop execution
-
-It does NOT make RabbitTemplate non-blocking.
-
----
-
-# 10. Dedicated Scheduler
-
-The framework should create a dedicated scheduler:
-
-```java
-Scheduler rabbitBridgeScheduler
-```
-
-Backing options:
+Rules:
 
 ```text
-platform thread pool
-virtual thread executor
+no Mono.just around blocking publish
+no inline RabbitTemplate execution on caller thread
+no AsyncRabbitTemplate in event bridge
+no outbox integration in Milestone 14 event bridge unless explicitly requested later
 ```
 
-Do NOT use:
-- Netty event loop
-- Reactor parallel scheduler blindly
-- unbounded platform thread creation
+## 8. Reactive Event Listener Bridge
 
-Example config:
-
-```yaml
-message:
-  reliability:
-    rabbit:
-      bridge:
-        executor-mode: virtual-thread
-        max-concurrency: 1000
-        queue-capacity: 10000
-```
-
----
-
-# 11. Reactive Consumer Bridge
-
-Main component:
+Main components:
 
 ```text
-ReactiveRabbitBridgeListenerContainer
+ReactiveRabbitBridgeListenerEndpoint
+ReactiveRabbitBridgeListenerMethodInvoker
+ReactiveRabbitBridgeListenerRegistrar
+ReactiveRabbitBridgeMessageHandler
 ```
 
-Consume flow:
-
-```text
-Spring AMQP listener thread
- -> deserialize message
- -> ReactiveIdempotencyStore.tryStart
- -> invoke reactive handler
- -> wait for Mono completion
- -> ack after success
-```
-
-Critical rule:
-
-```text
-ACK ONLY AFTER Mono COMPLETES SUCCESSFULLY
-```
-
----
-
-# 12. Reactive Listener Example
+Supported listener shape:
 
 ```java
 @ReactiveReliableListener("order.created")
-public Mono<Void> handle(
-    ReliableMessage<OrderCreatedEvent> message
-) {
+public Mono<Void> handle(ReliableMessage<OrderCreatedEvent> message) {
     return orderService.handle(message.payload());
 }
 ```
 
-The framework internally bridges:
-
-```text
-blocking listener thread
- <-> reactive handler pipeline
-```
-
----
-
-# 13. Listener Strategy
-
-There are two possible strategies.
-
-## Strategy A - Block Listener Thread
-
-Flow:
+Strategy A flow:
 
 ```text
 Spring AMQP listener thread
- -> invoke Mono handler
- -> block listener thread until Mono completes
- -> ack
+ -> deserialize ReliableMessage
+ -> invoke reactive handler
+ -> wait for Mono completion at the bridge boundary
+ -> ack only after success
 ```
 
-Pros:
-- simple
-- predictable ack semantics
-- easier failure handling
+Strategy A is intentionally blocking at the listener boundary. It is simple, explicit and predictable.
 
-Cons:
-- listener thread blocked
-- lower throughput with platform threads
-
-With Java 21 virtual threads:
-- this strategy becomes more attractive
-- blocking cost is much lower
-- still requires concurrency limits
-
-Recommendation:
+Not implemented in first version:
 
 ```text
-Start with Strategy A.
+Strategy B async ack coordination
+fire-and-forget subscribe
+advanced retry topology creation
 ```
 
-Do not over-engineer initial versions.
+## 9. Idempotency and Duplicate Semantics
 
----
+The listener integrates with `ReactiveIdempotencyStore`.
 
-## Strategy B - Async Ack Coordination
-
-Flow:
+New message flow:
 
 ```text
-listener thread
- -> subscribe reactive pipeline
- -> async completion callback
- -> ack later
+receive
+ -> tryStart
+ -> invoke handler Mono
+ -> markSuccess after handler Mono completes
+ -> ack only after markSuccess succeeds
 ```
 
-Pros:
-- potentially higher throughput
-- less thread blocking
-
-Cons:
-- significantly more complex
-- harder failure semantics
-- reconnect handling harder
-- ack lifecycle coordination harder
-
-Recommendation:
+Duplicate SUCCESS:
 
 ```text
-Consider later only if Strategy A cannot meet throughput requirements.
+do not invoke handler
+ack message
+record duplicate outcome
 ```
 
----
-
-# 14. Rabbit RPC Bridge with AsyncRabbitTemplate
-
-`AsyncRabbitTemplate` should be treated as Rabbit-based RPC support, not event messaging support.
-
-It is useful for:
+Duplicate PROCESSING or FAILED:
 
 ```text
-request/reply
-async RPC
-CompletableFuture-based response handling
-WebFlux bridge via Mono.fromFuture
+do not invoke handler
+do not ack as success
+use listener failure path and nack/failure hook
 ```
 
-It should NOT be used as the main event publishing mechanism.
-
----
-
-## 14.1 AsyncRabbitTemplate Positioning
-
-`AsyncRabbitTemplate` means:
+Failure flow:
 
 ```text
-Rabbit RPC async request/reply
+handler or idempotency failure
+ -> markFailed where possible
+ -> failure hook where configured
+ -> nack/requeue according to Rabbit listener failure path
 ```
 
-It does NOT mean:
+Rules:
 
 ```text
-fully reactive RabbitMQ
-event-driven reliable publishing
-outbox-backed messaging
-broker-level async workflow
+idempotency failure is not business success
+markSuccess failure must not ack as success
+handler failure must not ack as success
+Reactor retry is not Rabbit business retry
 ```
 
-It is closer to:
+## 10. Retry and DLQ
+
+Rabbit event retry/DLQ remains Rabbit-native.
+
+Recommended event flow:
 
 ```text
-HTTP/gRPC request-response
+main queue
+ -> failure
+ -> retry queue with TTL or broker policy
+ -> back to main queue
+ -> exceed attempts
+ -> DLQ
 ```
 
-than to:
+Milestone 14 event bridge exposes a minimal failure hook. Retry and DLQ outcome metrics are recorded only when event failure hooks expose concrete outcomes.
+
+The bridge does not implement RPC retry through Rabbit retry queues.
+
+## 11. Event Loop Safety
+
+Blocking Rabbit operations must never run on Netty event-loop threads.
+
+Implemented direction:
 
 ```text
-Rabbit event publish
-Kafka event publish
-outbox flush
-eventual consistency
+simple conservative event-loop thread-name detection
+warning or safety signal when publish is called from event-loop-style caller
+publish still succeeds when bridge capacity exists
+RabbitTemplate still runs only on bridge executor
 ```
 
----
-
-## 14.2 No Outbox by Default for RPC
-
-Rabbit RPC should not use outbox by default.
-
-Reason:
+Detected style examples:
 
 ```text
-RPC is request/response.
-The caller is waiting for a response or timeout.
-Saving request into outbox and flushing later changes the semantics.
+reactor-http-nio
+reactor-http-epoll
+reactor-http-kqueue
+reactor-tcp-nio
+nioEventLoop
+epollEventLoop
+kqueueEventLoop
 ```
 
-For RPC, the normal reliability model is:
+This detection is a safety signal, not the core correctness mechanism. Correctness comes from explicit bridge executor isolation and bounded concurrency.
+
+## 12. Observability
+
+Bridge metrics:
 
 ```text
-timeout
-retry
-circuit breaker
-bulkhead
-metrics
-tracing
-correlation id
+message_rabbit_bridge_publish_total
+message_rabbit_bridge_consume_total
+message_rabbit_bridge_duplicate_total
+message_rabbit_bridge_failure_outcome_total
+message_rabbit_bridge_executor_rejected_total
+message_rabbit_bridge_executor_active
+message_rabbit_bridge_executor_queued
 ```
 
-Not:
+Required tags:
 
 ```text
-outbox
-background flush
-eventual publish
-DLQ as primary flow
+runtime=webflux-bridge
+transport=rabbit
+executor_mode=platform|virtual-thread
+event_name=order.created
+status=success|failure|duplicate|retry|dlq|rejected
 ```
 
----
+Metrics must not:
 
-## 14.3 Correct RPC Flow
+```text
+change business flow
+swallow publish/consume errors
+introduce blocking behavior
+create a private unexported registry when no MeterRegistry exists
+```
 
-WebFlux RPC bridge flow:
+## 13. Rabbit RPC Bridge
+
+`AsyncRabbitTemplate` is Rabbit RPC support, not event messaging support.
+
+Correct RPC flow:
 
 ```text
 WebFlux request
- -> create RPC request
+ -> ReactiveRabbitRpcClient
  -> AsyncRabbitTemplate convertSendAndReceive
  -> CompletableFuture
  -> Mono.fromFuture
- -> timeout/retry/circuit breaker
- -> return response
+ -> timeout/retry/circuit-breaker/bulkhead
+ -> response or caller-visible failure
 ```
 
-Example concept:
-
-```java
-Mono.fromFuture(() ->
-    asyncRabbitTemplate.convertSendAndReceiveAsType(...)
-)
-.timeout(Duration.ofSeconds(2));
-```
-
-This avoids blocking the caller while waiting for the reply.
-
-However:
-
-```text
-Spring AMQP infrastructure is still not fully reactive.
-```
-
----
-
-## 14.4 When RPC Might Need Durable Storage
-
-There are rare cases where the request must not be lost.
-
-Example:
-
-```text
-bank transfer command
-high-value financial command
-legal/compliance command
-```
-
-If a command must be durable, do not model it as normal RPC.
-
-Instead, model it as:
-
-```text
-durable async command workflow
-```
-
-Possible flow:
-
-```text
-save command
-publish command event
-process asynchronously
-return accepted
-query status later
-```
-
-At that point, it is no longer regular RPC.
-
-It belongs to the event/outbox workflow.
-
----
-
-## 14.5 Recommended Module Split
-
-Keep Rabbit messaging and Rabbit RPC separate.
-
-Messaging module:
-
-```text
-reliable-message-rabbit-webflux-bridge
-```
-
-Uses:
-
-```text
-RabbitTemplate
-outbox optional
-retry/DLQ
-idempotency
-event publish/consume
-```
-
-RPC module:
-
-```text
-reliable-message-rpc-rabbit-webflux-bridge
-```
-
-Uses:
-
-```text
-AsyncRabbitTemplate
-request/reply
-timeout
-retry
-circuit breaker
-metrics
-tracing
-```
-
-Do not mix:
-
-```text
-ReliablePublisher
-```
-
-with:
-
-```text
-ReliableRpcClient
-```
-
-They have different semantics.
-
----
-
-## 14.6 RPC API
-
-Example API:
-
-```java
-public interface ReactiveRabbitRpcClient {
-
-    <T> Mono<T> request(
-        String route,
-        Object request,
-        Class<T> responseType,
-        RpcOptions options
-    );
-}
-```
-
-Options:
-
-```java
-public record RpcOptions(
-    Duration timeout,
-    RetryPolicy retryPolicy,
-    String correlationId,
-    Map<String, String> headers
-) {}
-```
-
----
-
-## 14.7 RPC Reliability Features
-
-Rabbit RPC bridge should support:
+RPC reliability features:
 
 ```text
 timeout
-retry
+retry for retryable RPC failures
 circuit breaker
 bulkhead
 correlation id
@@ -772,213 +551,43 @@ structured logs
 optional audit
 ```
 
-It should not support by default:
+RPC does not use by default:
 
 ```text
 outbox
 background flush
+Rabbit event retry queues
 DLQ command storage
 eventual response recovery
 ```
 
----
+If durability is required, model the workflow as async command/event messaging instead of normal RPC.
 
-## 14.8 RPC Failure Semantics
+## 14. Limitations
 
-Possible outcomes:
-
-```text
-success response
-timeout
-remote failure
-reply deserialization failure
-circuit breaker open
-broker unavailable
-```
-
-Caller should handle these like normal synchronous dependency failures.
-
-The framework should expose metrics:
-
-```text
-rpc_rabbit_requests_total
-rpc_rabbit_success_total
-rpc_rabbit_failed_total
-rpc_rabbit_timeout_total
-rpc_rabbit_retry_total
-rpc_rabbit_duration
-```
-
----
-
-## 14.9 Design Rule
-
-```text
-AsyncRabbitTemplate belongs to the RPC extension.
-RabbitTemplate belongs to event messaging.
-Outbox belongs to event messaging, not normal RPC.
-```
-
----
-
-# 15. Retry and DLQ
-
-RabbitMQ retry behavior remains Rabbit-native.
-
-Recommended flow:
-
-```text
-main queue
- -> fail
- -> retry queue with TTL
- -> back to main queue
- -> exceed attempts
- -> DLQ
-```
-
-Do NOT rely on Reactor-only retry for business retries.
-
-Use:
-- retry exchanges
-- retry queues
-- DLQ routing
-- retry headers
-
----
-
-# 16. Reactive Idempotency
-
-Allowed:
-- Reactive Redis
-- R2DBC
-
-Not recommended:
-- JDBC from reactive handler
-
-Consume flow:
-
-```text
-listener thread or virtual thread
- -> invoke reactive idempotency
- -> reactive business handler
- -> wait completion
- -> ack
-```
-
----
-
-# 17. WebFlux Compatibility
-
-The framework should still support:
-- Reactor Context
-- trace propagation
-- correlation IDs
-- reactive business pipelines
-
-Even though RabbitMQ itself remains blocking.
-
-Target flow:
-
-```text
-HTTP request
- -> WebFlux handler
- -> reactive business logic
- -> Rabbit bridge publish
- -> Rabbit bridge consume
- -> reactive downstream handler
-```
-
----
-
-# 18. Observability
-
-Metrics:
-
-```text
-message_publish_total
-message_publish_failed_total
-message_consume_total
-message_consume_failed_total
-message_retry_total
-message_dlq_total
-message_duplicate_total
-rabbit_bridge_executor_active_tasks
-rabbit_bridge_executor_queued_tasks
-rabbit_bridge_executor_rejected_tasks
-rabbit_bridge_executor_mode
-rabbit_bridge_concurrency_in_use
-```
-
-Tags:
-
-```text
-runtime=webflux-bridge
-transport=rabbit
-executor_mode=platform|virtual-thread
-event_name=order.created
-status=success|failed|duplicate|dlq
-```
-
-Trace spans:
-
-```text
-message.publish.rabbit.bridge
-message.consume.rabbit.bridge
-message.retry.rabbit
-message.dlq.rabbit
-```
-
----
-
-# 19. Event Loop Protection
-
-Critical production requirement:
-
-```text
-No Rabbit blocking call may execute on Netty event loop threads.
-```
-
-The framework should provide:
-- event loop blocking detection
-- warnings
-- metrics
-- scheduler/executor isolation
-
-Possible safety check:
-
-```text
-detect if publish occurs on reactor-http-nio thread
-emit warning metric/log
-```
-
----
-
-# 20. Limitations
-
-The framework must clearly document limitations.
-
-Examples:
+Honest limitations:
 
 ```text
 RabbitMQ layer remains blocking
+Spring AMQP listener containers are blocking infrastructure
+RabbitTemplate is blocking infrastructure
 virtual threads reduce blocking cost but do not make RabbitMQ reactive
-throughput may still be limited by RabbitMQ channels/connections
-backpressure is partial
-not equivalent to Reactor Kafka
+backpressure is partial and enforced through bounds/rejection
+throughput remains limited by RabbitMQ channels, connections and downstream systems
+Strategy A blocks listener/bridge threads until handler Mono completes
 ```
 
-Do NOT claim:
+Do not claim:
 
 ```text
-fully reactive RabbitMQ
-fully non-blocking messaging
-identical semantics to Kafka
+native Reactor RabbitMQ
+non-blocking broker messaging
+identical semantics to Reactor Kafka
+exactly-once processing
 unlimited concurrency because virtual threads exist
 ```
 
----
-
-# 21. Recommended Use Cases
+## 15. Recommended Use Cases
 
 Suitable for:
 
@@ -987,15 +596,15 @@ existing WebFlux systems using RabbitMQ
 migration scenarios
 organizations standardized on RabbitMQ
 incremental modernization
-Java 21 deployments that can use virtual threads
+Java 21 deployments that can use virtual threads responsibly
 ```
 
 Not recommended for:
 
 ```text
-greenfield reactive event platforms
+greenfield fully reactive event streaming
 extreme throughput reactive streaming
-systems requiring fully non-blocking messaging
+systems requiring fully non-blocking broker clients
 ```
 
 For greenfield reactive messaging:
@@ -1004,178 +613,30 @@ For greenfield reactive messaging:
 prefer Kafka + Reactor Kafka
 ```
 
----
+## 16. Roadmap Alignment
 
-# 22. Failure Handling
-
-The bridge module must handle:
-- listener crash
-- Mono failure
-- executor exhaustion
-- virtual thread saturation via external limits
-- duplicate delivery
-- retry exhaustion
-- Rabbit reconnect
-- blocking overload
-
-Required:
-- metrics
-- retry visibility
-- DLQ visibility
-- executor visibility
-
----
-
-# 23. Configuration Example
-
-Platform thread mode:
-
-```yaml
-message:
-  reliability:
-    runtime: webflux
-    transport: rabbit
-    mode: blocking-bridge
-
-    rabbit:
-      exchange: app.events
-
-      bridge:
-        enabled: true
-        executor-mode: platform
-        worker-threads: 16
-        queue-capacity: 10000
-        max-concurrency: 256
-```
-
-Virtual thread mode:
-
-```yaml
-message:
-  reliability:
-    runtime: webflux
-    transport: rabbit
-    mode: blocking-bridge
-
-    rabbit:
-      exchange: app.events
-
-      bridge:
-        enabled: true
-        executor-mode: virtual-thread
-        max-concurrency: 1000
-        queue-capacity: 10000
-        rejection-policy: fail-fast
-```
-
-Full example:
-
-```yaml
-message:
-  reliability:
-    runtime: webflux
-    transport: rabbit
-    mode: blocking-bridge
-
-    rabbit:
-      exchange: app.events
-
-      bridge:
-        enabled: true
-        executor-mode: virtual-thread
-        max-concurrency: 1000
-        queue-capacity: 10000
-
-    retry:
-      attempts: 5
-      backoff:
-        - 5s
-        - 30s
-        - 1m
-
-    idempotency:
-      enabled: true
-      store: redis-reactive
-```
-
----
-
-# 24. Recommended Roadmap Placement
-
-Roadmap:
+Current Milestone 14 order:
 
 ```text
-Milestone 12 -> RPC Support
-Milestone 13 -> Audit Extension
-Milestone 14 -> RabbitMQ WebFlux Blocking Bridge
+14.1 event bridge module scaffold and properties
+14.2 bridge executor and scheduler
+14.3 concurrency guard and fail-fast rejection
+14.4 ReactiveRabbitBridgePublisher
+14.5 Strategy A listener bridge
+14.6 listener failure, duplicate and idempotency semantics
+14.7 event-loop protection and overload behavior
+14.8 event observability
+14.9 Rabbit RPC WebFlux bridge module scaffold
+14.10 Rabbit RPC request/response client
+14.11 Rabbit RPC retry, circuit breaker, bulkhead and metrics
+14.12 documentation and limitations
 ```
 
-Suggested development order:
+Final recommendation:
 
 ```text
-14.1 executor abstraction
-14.2 platform thread executor provider
-14.3 virtual thread executor provider
-14.4 concurrency guard / bulkhead
-14.5 reactive publish bridge for event messaging
-14.6 reactive listener bridge for event messaging
-14.7 ack-after-Mono-completion
-14.8 Rabbit RPC bridge with AsyncRabbitTemplate
-14.9 RPC timeout/retry/circuit breaker
-14.10 retry/DLQ integration for event messaging
-14.11 reactive idempotency integration
-14.12 observability
-14.13 load testing with platform threads
-14.14 load testing with virtual threads
-14.15 limitation documentation
-```
-
----
-
-# 25. Final Recommendation
-
-Current stable recommendations:
-
-```text
-MVC + RabbitMQ
-MVC + Kafka
-WebFlux + Kafka
-```
-
-Additional supported hybrid mode:
-
-```text
-WebFlux + RabbitMQ Blocking Bridge
-```
-
-For Java 21, the bridge should support:
-
-```text
-virtual-thread executor mode
-```
-
-But it must be positioned honestly:
-
-```text
-hybrid mode
-blocking bridge
-migration support
-virtual-thread optimized blocking support
-```
-
-The framework should:
-- isolate blocking work
-- protect event loop threads
-- optionally use Java 21 virtual threads
-- preserve reliability
-- preserve observability
-
-without pretending Spring AMQP is fully reactive.
-
-Additional rule:
-
-```text
-AsyncRabbitTemplate is supported only for Rabbit RPC request/reply.
-It should not be used as a replacement for event publishing.
-RPC does not use outbox by default.
+Keep WebFlux Rabbit event messaging as a blocking bridge.
+Keep Rabbit RPC in a separate AsyncRabbitTemplate module.
+Keep outbox/idempotency/retry/DLQ semantics attached to event messaging.
+Keep timeout/retry/circuit-breaker/bulkhead semantics attached to RPC.
 ```
