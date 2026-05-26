@@ -16,6 +16,18 @@ This is blocking bridge / hybrid mode / migration support. It is not fully react
 
 This event bridge uses `RabbitTemplate` internally. `AsyncRabbitTemplate` is RPC only.
 
+Add R2DBC outbox when the WebFlux service must flush durable event rows through this bridge:
+
+```xml
+<dependency>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-outbox-r2dbc</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+Outbox remains event-messaging only. Do not use outbox for normal RPC.
+
 ## Platform Executor Configuration
 
 ```yaml
@@ -36,6 +48,11 @@ message:
         queue-capacity: 1000
         max-concurrency: 256
         rejection-policy: fail-fast
+    outbox:
+      enabled: true
+      flush-enabled: true
+      schema:
+        payload-storage: json
 ```
 
 ## Virtual-Thread Executor Configuration
@@ -58,6 +75,42 @@ message:
 ```
 
 Virtual threads reduce blocking cost. They are not reactive and do not remove concurrency limits.
+
+## R2DBC Outbox Schema Configuration
+
+When `reliable-message-outbox-r2dbc` is present and outbox flushing is enabled, schema column types resolve in this order:
+
+1. User explicit config.
+2. Dialect recommended default.
+3. Generic fallback.
+
+Common modes:
+
+```yaml
+message:
+  reliability:
+    outbox:
+      enabled: true
+      schema:
+        payload-storage: text   # text | json; binary is planned and fails fast today
+```
+
+PostgreSQL JSON mode resolves `payload` and `headers` to `jsonb`; MySQL text mode resolves payload to `longtext`; SQL Server text mode resolves payload to `nvarchar(max)`.
+
+Use advanced overrides when needed:
+
+```yaml
+message:
+  reliability:
+    outbox:
+      schema:
+        payload-column-type: clob
+        headers-column-type: clob
+        payload-bytes-column-type: blob
+        last-error-column-type: clob
+```
+
+`payload-storage: binary` is planned, not supported by the current runtime store. It fails fast until binary payload codec and `payload_bytes` read/write support are implemented.
 
 ## Publish An Event
 

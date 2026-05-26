@@ -42,14 +42,25 @@ public class R2dbcOutboxAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    OutboxSchema reliableMessageR2dbcOutboxSchema(
+            R2dbcOutboxProperties properties,
+            ObjectProvider<ConnectionFactory> connectionFactory
+    ) {
+        OutboxDatabaseDialect dialect = OutboxDatabaseDialect.from(connectionFactory.getIfAvailable());
+        return new OutboxSchemaResolver(properties).resolve(dialect);
+    }
+
+    @Bean
     @ConditionalOnBean(DatabaseClient.class)
     @ConditionalOnMissingBean(ReactiveOutboxStore.class)
     R2dbcOutboxStore r2dbcOutboxStore(
             DatabaseClient databaseClient,
             ObjectProvider<ObjectMapper> objectMapper,
-            Clock clock
+            Clock clock,
+            OutboxSchema schema
     ) {
-        return new R2dbcOutboxStore(databaseClient, objectMapper.getIfAvailable(ObjectMapper::new), clock);
+        return new R2dbcOutboxStore(databaseClient, objectMapper.getIfAvailable(ObjectMapper::new), clock, schema);
     }
 
     @Configuration(proxyBeanMethods = false)

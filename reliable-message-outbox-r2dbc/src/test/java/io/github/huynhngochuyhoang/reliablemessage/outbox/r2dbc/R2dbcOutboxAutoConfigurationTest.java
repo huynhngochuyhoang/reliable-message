@@ -82,7 +82,6 @@ class R2dbcOutboxAutoConfigurationTest {
                         .doesNotHaveBean(ScheduledAnnotationBeanPostProcessor.class));
     }
 
-
     @Test
     void enablesSchedulingOnlyWhenOutboxFlusherCanBeCreated() {
         contextRunner
@@ -105,6 +104,50 @@ class R2dbcOutboxAutoConfigurationTest {
                         .hasSingleBean(ReactiveOutboxStore.class)
                         .doesNotHaveBean(ReactiveOutboxFlushScheduler.class));
     }
+
+    @Test
+    void schemaPropertiesBindAndResolveExplicitColumnTypes() {
+        contextRunner
+                .withPropertyValues(
+                        "message.reliability.outbox.schema.payload-storage=json",
+                        "message.reliability.outbox.schema.payload-column-type=json",
+                        "message.reliability.outbox.schema.headers-column-type=json",
+                        "message.reliability.outbox.schema.payload-bytes-column-type=bytea",
+                        "message.reliability.outbox.schema.last-error-column-type=clob"
+                )
+                .run(context -> {
+                    OutboxSchema schema = context.getBean(OutboxSchema.class);
+
+                    assertThat(schema.payloadColumnType()).isEqualTo("json");
+                    assertThat(schema.headersColumnType()).isEqualTo("json");
+                    assertThat(schema.payloadBytesColumnType()).isEqualTo("bytea");
+                    assertThat(schema.lastErrorColumnType()).isEqualTo("clob");
+                });
+    }
+
+    @Test
+    void invalidPayloadStoragePropertyFailsStartupClearly() {
+        contextRunner
+                .withPropertyValues("message.reliability.outbox.schema.payload-storage=invalid")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasRootCauseInstanceOf(IllegalArgumentException.class);
+                });
+    }
+
+    @Test
+    void binaryPayloadStoragePropertyFailsStartupClearly() {
+        contextRunner
+                .withPropertyValues("message.reliability.outbox.schema.payload-storage=binary")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                            .rootCause()
+                            .hasMessage("binary payload storage requires runtime codec/storage support that is not implemented yet");
+                });
+    }
+
 
     @Configuration(proxyBeanMethods = false)
     static class StoreAndPublisherConfig {

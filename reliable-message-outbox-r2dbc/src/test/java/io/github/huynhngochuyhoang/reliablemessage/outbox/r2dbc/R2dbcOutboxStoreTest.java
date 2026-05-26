@@ -18,6 +18,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 class R2dbcOutboxStoreTest {
 
     private static final Instant NOW = Instant.parse("2026-05-18T00:00:00Z");
@@ -177,6 +179,99 @@ class R2dbcOutboxStoreTest {
                 .verifyComplete();
     }
 
+    @Test
+    void postgresqlJsonModeUsesPostgresJsonPayloadBinder() {
+        R2dbcOutboxProperties properties = new R2dbcOutboxProperties();
+        properties.getSchema().setPayloadStorage(R2dbcOutboxProperties.PayloadStorage.JSON);
+        OutboxSchema schema = new OutboxSchemaResolver(properties).resolve(OutboxDatabaseDialect.POSTGRESQL);
+
+        assertThat(schema.payloadBinder()).isInstanceOf(PostgresJsonOutboxPayloadBinder.class);
+    }
+    @Test
+    void postgresqlJsonModeInsertSqlStaysDialectNeutral() {
+        String insertSql = R2dbcOutboxStore.insertSql();
+
+        assertThat(insertSql).doesNotContain("cast(:payload as jsonb)");
+        assertThat(insertSql).doesNotContain("::jsonb");
+        assertThat(insertSql).contains(":payload");
+        assertThat(insertSql).contains(":headers");
+    }
+
+    @Test
+    void textModeUsesDefaultPayloadBinder() {
+        OutboxSchema schema = new OutboxSchemaResolver(new R2dbcOutboxProperties()).resolve(OutboxDatabaseDialect.POSTGRESQL);
+
+        assertThat(schema.payloadBinder()).isInstanceOf(DefaultOutboxPayloadBinder.class);
+    }
+
+    @Test
+    void genericJsonFallbackUsesDefaultPayloadBinder() {
+        R2dbcOutboxProperties properties = new R2dbcOutboxProperties();
+        properties.getSchema().setPayloadStorage(R2dbcOutboxProperties.PayloadStorage.JSON);
+
+        OutboxSchema schema = new OutboxSchemaResolver(properties).resolve(OutboxDatabaseDialect.GENERIC);
+
+        assertThat(schema.payloadBinder()).isInstanceOf(DefaultOutboxPayloadBinder.class);
+    }
+
+
+    @Test
+    void jsonSchemaSavesAndReadsPayloadAndHeaders() {
+        TestStore testStore = store(new OutboxSchema("json", "json", "bytea", "text"));
+
+        StepVerifier.create(testStore.store.initializeSchema()
+                        .then(testStore.store.save(message("event-json")))
+                        .thenMany(testStore.store.findPending(10))
+                        .single())
+                .assertNext(message -> {
+                    assertThat(((JsonNode) message.payload()).get("orderId").asText()).isEqualTo("order-1");
+                    assertThat(message.headers()).containsEntry("trace-id", "trace-1");
+                })
+                .verifyComplete();
+    }
+    @Test
+    void postgresqlJsonbSchemaUsesPostgresBinderAndCleanSql() {
+        OutboxSchema schema = new OutboxSchema("jsonb", "jsonb", "bytea", "text", OutboxDatabaseDialect.POSTGRESQL);
+
+        assertThat(schema.payloadBinder()).isInstanceOf(PostgresJsonOutboxPayloadBinder.class);
+        assertThat(R2dbcOutboxStore.insertSql()).doesNotContain("cast(:payload as jsonb)");
+        assertThat(R2dbcOutboxStore.insertSql()).doesNotContain("::jsonb");
+    }
+
+
+    @Test
+    void schemaInitializerUsesResolvedColumnTypes() {
+        OutboxSchema schema = new OutboxSchema(
+                "clob",
+                "json",
+                "blob",
+                "clob"
+        );
+
+        String ddl = R2dbcOutboxStore.schemaDdl(schema);
+
+        assertThat(ddl).contains("payload clob not null");
+        assertThat(ddl).contains("headers json");
+        assertThat(ddl).contains("payload_bytes blob");
+        assertThat(ddl).contains("last_error clob");
+    }
+
+    @Test
+    void schemaInitializerDoesNotHardcodePayloadTextOrJsonb() {
+        OutboxSchema schema = new OutboxSchema(
+                "longtext",
+                "longtext",
+                "longblob",
+                "longtext"
+        );
+
+        String ddl = R2dbcOutboxStore.schemaDdl(schema);
+
+        assertThat(ddl).contains("payload longtext not null");
+        assertThat(ddl).doesNotContain("payload text not null");
+        assertThat(ddl).doesNotContain("payload jsonb not null");
+    }
+
     private static OutboxMessage message(String id) {
         return new OutboxMessage(
                 id,
@@ -185,7 +280,7 @@ class R2dbcOutboxStoreTest {
                 "event-1",
                 "order-1",
                 new OrderCreated("order-1"),
-                PublishOptions.builder().correlationId("correlation-1").build().headers(),
+                PublishOptions.builder().correlationId("correlation-1").header("trace-id", "trace-1").build().headers(),
                 MessageStatus.PENDING,
                 0,
                 null,
@@ -216,6 +311,10 @@ class R2dbcOutboxStoreTest {
     }
 
     private static TestStore store() {
+        return store(new OutboxSchemaResolver(new R2dbcOutboxProperties()).resolve(OutboxDatabaseDialect.POSTGRESQL));
+    }
+
+    private static TestStore store(OutboxSchema schema) {
         ConnectionFactory connectionFactory = ConnectionFactories.get(
                 "r2dbc:h2:mem:///" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
         );
@@ -224,7 +323,7 @@ class R2dbcOutboxStoreTest {
         return new TestStore(
                 connectionFactory,
                 databaseClient,
-                new R2dbcOutboxStore(databaseClient, new ObjectMapper(), clock)
+                new R2dbcOutboxStore(databaseClient, new ObjectMapper(), clock, schema)
         );
     }
 
