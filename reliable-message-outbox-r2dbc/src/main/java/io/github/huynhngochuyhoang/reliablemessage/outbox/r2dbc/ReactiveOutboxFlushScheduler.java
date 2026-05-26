@@ -53,6 +53,7 @@ public class ReactiveOutboxFlushScheduler {
 
     private Mono<Integer> publishAndMark(OutboxMessage message) {
         return reliablePublisher.publish(message.eventName(), message.payload(), message.toPublishOptions())
+                .timeout(properties.getPublishTimeout())
                 .thenReturn(true)
                 .onErrorResume(error -> markFailed(message, error).thenReturn(false))
                 .flatMap(published -> published

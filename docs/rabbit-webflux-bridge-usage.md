@@ -99,7 +99,6 @@ message:
     rabbit:
       bridge:
         executor-mode: virtual-thread
-        queue-capacity: 1000
         max-concurrency: 1000
         rejection-policy: fail-fast
 ```
@@ -273,11 +272,16 @@ message_rabbit_bridge_consume_total
 message_rabbit_bridge_duplicate_total
 message_rabbit_bridge_failure_outcome_total
 message_rabbit_bridge_executor_rejected_total
+```
+
+Platform executor gauges are emitted only in platform mode, where the bridge executor is a `ThreadPoolExecutor`:
+
+```text
 message_rabbit_bridge_executor_active
 message_rabbit_bridge_executor_queued
 ```
 
-Retry and DLQ outcome metrics are recorded only when event failure hooks expose concrete outcomes.
+Virtual-thread mode does not emit active/queued executor gauges because it uses semaphore-bounded submission rather than a `ThreadPoolExecutor` queue. Retry and DLQ outcome metrics are recorded only when event failure hooks expose concrete outcomes.
 
 ## Topology Declaration
 
@@ -290,7 +294,8 @@ Keep these limits visible in service documentation:
 - RabbitMQ work remains blocking Spring AMQP work.
 - The bridge is not fully reactive RabbitMQ and not native Reactor RabbitMQ.
 - Virtual threads are not unlimited concurrency.
-- Backpressure is bounded through queue capacity, concurrency guard and fail-fast rejection.
+- Platform mode bounds work through queue capacity, concurrency guard and fail-fast rejection.
+- Virtual-thread mode bounds work through semaphore-based submission, concurrency guard and fail-fast rejection; `queue-capacity` does not affect virtual-thread overload behavior.
 - Listener Strategy A blocks at the bridge boundary until handler completion.
 - Outbox integration is not part of Milestone 14 event bridge unless added later.
 - Rabbit RPC belongs in a separate `AsyncRabbitTemplate`-based module.

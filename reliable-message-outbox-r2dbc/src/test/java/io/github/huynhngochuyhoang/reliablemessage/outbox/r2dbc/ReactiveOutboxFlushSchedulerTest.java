@@ -20,8 +20,10 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ReactiveOutboxFlushSchedulerTest {
 
@@ -70,6 +72,42 @@ class ReactiveOutboxFlushSchedulerTest {
         assertThat(store.failedIds()).containsExactly("event-1");
         assertThat(store.nextRetryAt()).isEqualTo(NOW.plusSeconds(45));
     }
+
+    @Test
+    void hungPublishTimesOutAndReleasesRunningGuard() {
+        RecordingOutboxStore store = new RecordingOutboxStore(List.of(message("event-1")));
+        RecordingPublisher publisher = new RecordingPublisher();
+        publisher.publishResult(Mono.never());
+        R2dbcOutboxProperties properties = properties();
+        properties.setPublishTimeout(Duration.ofMillis(10));
+        ReactiveOutboxFlushScheduler scheduler = scheduler(store, publisher, properties);
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectNext(0)
+                .verifyComplete();
+
+        assertThat(store.failedIds()).containsExactly("event-1");
+        assertThat(store.failedErrors()).singleElement().isInstanceOf(TimeoutException.class);
+
+        publisher.publishResult(Mono.empty());
+
+        StepVerifier.create(scheduler.flushBatch())
+                .expectNext(1)
+                .verifyComplete();
+
+        assertThat(store.findPendingCalls()).isEqualTo(2);
+        assertThat(store.publishedIds()).containsExactly("event-1");
+    }
+
+    @Test
+    void rejectsNonPositivePublishTimeout() {
+        R2dbcOutboxProperties properties = new R2dbcOutboxProperties();
+
+        assertThatThrownBy(() -> properties.setPublishTimeout(Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("publishTimeout must be positive");
+    }
+
 
     @Test
     void flushTicksDoNotOverlap() {
@@ -150,6 +188,7 @@ class ReactiveOutboxFlushSchedulerTest {
         properties.setFlushEnabled(true);
         properties.setBatchSize(10);
         properties.setRetryDelay(Duration.ofSeconds(30));
+        properties.setPublishTimeout(Duration.ofSeconds(30));
         return properties;
     }
 
@@ -204,6 +243,7 @@ class ReactiveOutboxFlushSchedulerTest {
         private final List<String> events = new ArrayList<>();
         private final List<String> publishedIds = new ArrayList<>();
         private final List<String> failedIds = new ArrayList<>();
+        private final List<Throwable> failedErrors = new ArrayList<>();
         private int lastLimit;
         private int findPendingCalls;
         private Instant nextRetryAt;
@@ -240,6 +280,7 @@ class ReactiveOutboxFlushSchedulerTest {
             return Mono.fromRunnable(() -> {
                 events.add("markFailed:" + id);
                 failedIds.add(id);
+                failedErrors.add(error);
                 this.nextRetryAt = nextRetryAt;
             });
         }
@@ -254,6 +295,10 @@ class ReactiveOutboxFlushSchedulerTest {
 
         List<String> failedIds() {
             return failedIds;
+        }
+
+        List<Throwable> failedErrors() {
+            return failedErrors;
         }
 
         int lastLimit() {

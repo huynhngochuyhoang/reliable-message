@@ -351,7 +351,9 @@ Start with the dedicated usage page:
 
 Rabbit RPC is request/response. It is separate from event messaging. `AsyncRabbitTemplate` is RPC only. RPC does not use outbox by default.
 
-Use:
+Current status: planned, not implemented in this repository yet. There is no `reliable-message-rpc-rabbit-webflux-bridge` module and no `ReactiveRabbitRpcClient` implementation available today.
+
+Planned direction:
 
 ```text
 ReactiveRabbitRpcClient
@@ -369,7 +371,7 @@ outbox for normal RPC by default
 Rabbit event retry queues as RPC retry semantics
 ```
 
-Conceptual flow:
+Planned conceptual flow:
 
 ```text
 WebFlux caller

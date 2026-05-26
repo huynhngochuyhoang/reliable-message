@@ -12,6 +12,7 @@ public class R2dbcOutboxProperties {
     private int batchSize = 100;
     private Duration flushDelay = Duration.ofSeconds(5);
     private Duration retryDelay = Duration.ofSeconds(30);
+    private Duration publishTimeout = Duration.ofSeconds(30);
 
     public boolean isEnabled() {
         return enabled;
@@ -49,6 +50,17 @@ public class R2dbcOutboxProperties {
             throw new IllegalArgumentException("flushDelay must be positive");
         }
         this.flushDelay = flushDelay;
+    }
+
+    public Duration getPublishTimeout() {
+        return publishTimeout;
+    }
+
+    public void setPublishTimeout(Duration publishTimeout) {
+        if (publishTimeout == null || publishTimeout.isNegative() || publishTimeout.isZero()) {
+            throw new IllegalArgumentException("publishTimeout must be positive");
+        }
+        this.publishTimeout = publishTimeout;
     }
 
     public Duration getRetryDelay() {
