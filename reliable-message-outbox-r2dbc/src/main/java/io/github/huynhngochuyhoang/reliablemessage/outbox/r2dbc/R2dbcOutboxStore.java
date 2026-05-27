@@ -13,13 +13,15 @@ import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.*;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Objects;
 
 public class R2dbcOutboxStore implements ReactiveOutboxStore {
 
-    private static final Duration PROCESSING_LEASE_DURATION = Duration.ofMinutes(5);
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {
     };
 
@@ -27,6 +29,7 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final OutboxSchema schema;
+    private final OutboxClaimStrategy claimStrategy;
 
     public R2dbcOutboxStore(DatabaseClient databaseClient, ObjectMapper objectMapper) {
         this(databaseClient, objectMapper, Clock.systemUTC());
@@ -37,10 +40,23 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
     }
 
     public R2dbcOutboxStore(DatabaseClient databaseClient, ObjectMapper objectMapper, Clock clock, OutboxSchema schema) {
+        this(databaseClient, objectMapper, clock, schema, null);
+    }
+
+    public R2dbcOutboxStore(
+            DatabaseClient databaseClient,
+            ObjectMapper objectMapper,
+            Clock clock,
+            OutboxSchema schema,
+            OutboxClaimStrategy claimStrategy
+    ) {
         this.databaseClient = Objects.requireNonNull(databaseClient, "databaseClient must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.schema = Objects.requireNonNull(schema, "schema must not be null");
+        this.claimStrategy = claimStrategy == null
+                ? OutboxClaimStrategy.create(databaseClient, schema, this::mapRow)
+                : claimStrategy;
     }
 
     static OutboxSchema defaultSchema(DatabaseClient databaseClient) {
@@ -119,32 +135,7 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
 
     @Override
     public Flux<OutboxMessage> findPending(int limit) {
-        if (limit <= 0) {
-            return Flux.error(new IllegalArgumentException("limit must be positive"));
-        }
-        Instant now = clock.instant();
-        Instant expiredProcessingBefore = now.minus(PROCESSING_LEASE_DURATION);
-
-        return databaseClient.sql("""
-                        select id
-                        from message_outbox
-                        where status = :pending
-                           or (status = :failed and (next_retry_at is null or next_retry_at <= :now))
-                           or (status = :processing and processing_started_at <= :expiredProcessingBefore)
-                        order by created_at asc
-                        limit :limit
-                        """)
-                .bind("pending", MessageStatus.PENDING.name())
-                .bind("failed", MessageStatus.FAILED.name())
-                .bind("now", localDateTime(now))
-                .bind("processing", MessageStatus.PROCESSING.name())
-                .bind("expiredProcessingBefore", localDateTime(expiredProcessingBefore))
-                .bind("limit", limit)
-                .map((row, metadata) -> row.get("id", String.class))
-                .all()
-                .concatMap(id -> claim(id, now)
-                        .filter(Boolean::booleanValue)
-                        .flatMap(ignored -> findByIdProcessing(id)));
+        return claimStrategy.claim(limit, clock.instant());
     }
 
     @Override
@@ -180,40 +171,6 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
         spec = bindNullable(spec, "nextRetryAt", localDateTime(nextRetryAt), LocalDateTime.class);
         spec = bindNullable(spec, "lastError", error == null ? null : error.getMessage(), String.class);
         return spec.fetch().rowsUpdated().then();
-    }
-
-    private Mono<Boolean> claim(String id, Instant now) {
-        return databaseClient.sql("""
-                        update message_outbox
-                        set status = :processing, processing_started_at = :processingStartedAt
-                        where id = :id
-                          and (status = :pending
-                            or (status = :failed and (next_retry_at is null or next_retry_at <= :now))
-                            or (status = :processing and processing_started_at <= :expiredProcessingBefore))
-                        """)
-                .bind("processing", MessageStatus.PROCESSING.name())
-                .bind("processingStartedAt", localDateTime(now))
-                .bind("id", id)
-                .bind("pending", MessageStatus.PENDING.name())
-                .bind("failed", MessageStatus.FAILED.name())
-                .bind("now", localDateTime(now))
-                .bind("expiredProcessingBefore", localDateTime(now.minus(PROCESSING_LEASE_DURATION)))
-                .fetch()
-                .rowsUpdated()
-                .map(updated -> updated == 1);
-    }
-
-    private Mono<OutboxMessage> findByIdProcessing(String id) {
-        return databaseClient.sql("""
-                        select id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
-                               status, retry_count, next_retry_at, created_at, published_at, last_error
-                        from message_outbox
-                        where id = :id and status = :processing
-                        """)
-                .bind("id", id)
-                .bind("processing", MessageStatus.PROCESSING.name())
-                .map(this::mapRow)
-                .one();
     }
 
     private OutboxMessage mapRow(Row row, RowMetadata metadata) {

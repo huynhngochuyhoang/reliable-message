@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.r2dbc.connection.R2dbcTransactionManager;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.transaction.reactive.TransactionalOperator;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -24,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -83,6 +85,64 @@ class R2dbcOutboxStoreTest {
                         .then(testStore.store.markPublished("event-1"))
                         .then(status(testStore.databaseClient, "event-1")))
                 .expectNext(MessageStatus.PUBLISHED.name())
+                .verifyComplete();
+    }
+
+    @Test
+    void findPendingDelegatesToClaimStrategy() {
+        AtomicInteger calls = new AtomicInteger();
+        OutboxClaimStrategy strategy = (limit, now) -> {
+            calls.incrementAndGet();
+            assertThat(limit).isEqualTo(5);
+            assertThat(now).isEqualTo(NOW);
+            return Flux.just(message("claimed-1"));
+        };
+        DatabaseClient databaseClient = DatabaseClient.create(connectionFactory("H2"));
+        R2dbcOutboxStore store = new R2dbcOutboxStore(
+                databaseClient,
+                new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                new OutboxSchema("text", "text", "bytea", "text", OutboxDatabaseDialect.GENERIC),
+                strategy
+        );
+
+        StepVerifier.create(store.findPending(5))
+                .expectNextMatches(message -> "claimed-1".equals(message.id()))
+                .verifyComplete();
+
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
+    void findPendingClaimsOnlyEligibleRows() {
+        TestStore testStore = store();
+
+        StepVerifier.create(testStore.store.initializeSchema()
+                        .then(testStore.store.save(message("pending-1", MessageStatus.PENDING, null)))
+                        .then(testStore.store.save(message("failed-retryable", MessageStatus.FAILED, NOW.minusSeconds(1))))
+                        .then(testStore.store.save(message("failed-waiting", MessageStatus.FAILED, NOW.plusSeconds(60))))
+                        .then(testStore.store.save(message("processing-expired", MessageStatus.PROCESSING, null)))
+                        .then(testStore.store.save(message("processing-active", MessageStatus.PROCESSING, null)))
+                        .then(testStore.store.save(message("published-1", MessageStatus.PUBLISHED, null)))
+                        .then(setProcessingStartedAt(testStore.databaseClient, "processing-expired", NOW.minusSeconds(301)))
+                        .then(setProcessingStartedAt(testStore.databaseClient, "processing-active", NOW.minusSeconds(60)))
+                        .thenMany(testStore.store.findPending(10))
+                        .map(OutboxMessage::id)
+                        .collectList())
+                .assertNext(ids -> assertThat(ids).containsExactly("pending-1", "failed-retryable", "processing-expired"))
+                .verifyComplete();
+    }
+
+    @Test
+    void concurrentClaimersDoNotReceiveSameRow() {
+        TestStore testStore = store();
+
+        StepVerifier.create(testStore.store.initializeSchema()
+                        .then(testStore.store.save(message("event-1")))
+                        .thenMany(Flux.merge(testStore.store.findPending(1), testStore.store.findPending(1)))
+                        .map(OutboxMessage::id)
+                        .collectList())
+                .assertNext(ids -> assertThat(ids).containsExactly("event-1"))
                 .verifyComplete();
     }
 
@@ -326,6 +386,24 @@ class R2dbcOutboxStoreTest {
         );
     }
 
+    private static OutboxMessage message(String id, MessageStatus status, Instant nextRetryAt) {
+        return new OutboxMessage(
+                id,
+                "order.created",
+                "order-1",
+                id,
+                "order-1",
+                new OrderCreated("order-1"),
+                PublishOptions.builder().correlationId("correlation-1").header("trace-id", "trace-1").build().headers(),
+                status,
+                0,
+                nextRetryAt,
+                NOW,
+                status == MessageStatus.PUBLISHED ? NOW : null,
+                null
+        );
+    }
+
     private static DatabaseClient.GenericExecuteSpec recordingSpec(Map<String, Object> boundValues) {
         Object[] proxy = new Object[1];
         proxy[0] = Proxy.newProxyInstance(
@@ -353,12 +431,10 @@ class R2dbcOutboxStoreTest {
                 return Mono.error(new UnsupportedOperationException("not used"));
             }
 
-
             @Override
             public ConnectionFactoryMetadata getMetadata() {
                 return () -> name;
             }
-
         };
     }
 
@@ -382,8 +458,21 @@ class R2dbcOutboxStoreTest {
                 .one();
     }
 
+    private static Mono<Void> setProcessingStartedAt(DatabaseClient databaseClient, String id, Instant processingStartedAt) {
+        return databaseClient.sql("""
+                        update message_outbox
+                        set processing_started_at = :processingStartedAt
+                        where id = :id
+                        """)
+                .bind("processingStartedAt", processingStartedAt.atOffset(ZoneOffset.UTC).toLocalDateTime())
+                .bind("id", id)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
     private static TestStore store() {
-        return store(new OutboxSchemaResolver(new R2dbcOutboxProperties()).resolve(OutboxDatabaseDialect.POSTGRESQL));
+        return store(new OutboxSchema("text", "text", "bytea", "text", OutboxDatabaseDialect.GENERIC));
     }
 
     private static TestStore store(OutboxSchema schema) {
