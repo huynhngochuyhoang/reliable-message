@@ -28,6 +28,7 @@
         <module>reliable-message-rpc-core</module>
         <module>reliable-message-rpc-mvc</module>
         <module>reliable-message-rpc-webflux</module>
+        <module>reliable-message-rpc-rabbit-webflux-bridge</module>
         <module>reliable-message-audit-core</module>
         <module>reliable-message-audit-mvc</module>
         <module>reliable-message-audit-webflux</module>
