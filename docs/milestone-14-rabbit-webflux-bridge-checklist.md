@@ -10,7 +10,7 @@ This milestone adds RabbitMQ support for WebFlux systems as a blocking bridge, h
 - [x] Bridge execution is isolated behind explicit platform or virtual-thread executor modes.
 - [x] Overload behavior is bounded with fail-fast rejection.
 - [x] Bridge metrics use `runtime=webflux-bridge`, `transport=rabbit`, and `executor_mode` tags.
-- [ ] Phase 14.9 and later keep Rabbit RPC in a separate `AsyncRabbitTemplate`-based module.
+- [x] Phase 14.9 and later keep Rabbit RPC in a separate `AsyncRabbitTemplate`-based module.
 - [ ] Phase 14.12 remains the user-facing README and usage documentation pass.
 
 ## Implemented Direction
@@ -334,37 +334,37 @@ Out of scope:
 ## Phase 14.9 Rabbit RPC WebFlux Bridge Module Scaffold
 
 Goal:
-- [ ] Create a separate RPC bridge module using `AsyncRabbitTemplate`.
+- [x] Create a separate RPC bridge module using `AsyncRabbitTemplate`.
 
 Implementation tasks:
-- [ ] Add `reliable-message-rpc-rabbit-webflux-bridge/pom.xml`.
-- [ ] Add the module to the root `pom.xml`.
-- [ ] Add `ReactiveRabbitRpcClient`.
-- [ ] Add `RabbitRpcWebFluxBridgeProperties`.
-- [ ] Add `RabbitRpcWebFluxBridgeAutoConfiguration`.
-- [ ] Keep package and class names clearly separate from event messaging.
+- [x] Add `reliable-message-rpc-rabbit-webflux-bridge/pom.xml`.
+- [x] Add the module to the root `pom.xml`.
+- [x] Add `ReactiveRabbitRpcClient`.
+- [x] Add `RabbitRpcWebFluxBridgeProperties`.
+- [x] Add `RabbitRpcWebFluxBridgeAutoConfiguration`.
+- [x] Keep package and class names clearly separate from event messaging.
 
 Tests to write first:
-- [ ] Auto-configuration creates RPC client only when `AsyncRabbitTemplate` exists.
-- [ ] RPC auto-configuration does not create event publisher beans.
-- [ ] RPC auto-configuration does not create event listener beans.
-- [ ] RPC module does not depend on outbox by default.
-- [ ] RPC module does not use `RabbitTemplate`.
+- [x] Auto-configuration creates RPC client only when `AsyncRabbitTemplate` exists.
+- [x] RPC auto-configuration does not create event publisher beans.
+- [x] RPC auto-configuration does not create event listener beans.
+- [x] RPC module does not depend on outbox by default.
+- [x] RPC module does not use `RabbitTemplate`.
 
 Success criteria:
-- [ ] RPC bridge is physically separate from the event bridge module.
-- [ ] `AsyncRabbitTemplate` appears only in the RPC bridge.
-- [ ] No outbox behavior exists in RPC defaults.
+- [x] RPC bridge is physically separate from the event bridge module.
+- [x] `AsyncRabbitTemplate` appears only in the RPC bridge.
+- [x] No outbox behavior exists in RPC defaults.
 
 Risks:
-- [ ] Shared configuration blurs event and RPC semantics.
-- [ ] RPC code accidentally depends on event bridge classes.
+- [x] Shared configuration blurs event and RPC semantics.
+- [x] RPC code accidentally depends on event bridge classes.
 
 Out of scope:
-- [ ] Event messaging.
-- [ ] Outbox.
-- [ ] `RabbitTemplate`.
-- [ ] Retry, circuit breaker, and bulkhead behavior.
+- [x] Event messaging.
+- [x] Outbox.
+- [x] `RabbitTemplate`.
+- [x] Retry, circuit breaker, and bulkhead behavior.
 
 ## Phase 14.10 Rabbit RPC Request/Response Client
 
