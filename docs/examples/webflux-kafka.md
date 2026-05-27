@@ -52,9 +52,30 @@ message:
         - 5m
     idempotency:
       ttl: 24h
+    outbox:
+      enabled: true
+      flush-enabled: true
+      schema:
+        payload-storage: json
 ```
 
 R2DBC outbox is provided by `R2dbcOutboxStore`. It uses `DatabaseClient` and can participate in caller-managed reactive transactions.
+
+The schema resolver chooses column types in this order: explicit user config, dialect default, then generic fallback. For PostgreSQL JSON storage, `payload-storage: json` resolves `payload` and `headers` to `jsonb`. For MySQL text storage, the default payload type is `longtext`.
+
+Use explicit overrides when your database governance requires exact column types:
+
+```yaml
+message:
+  reliability:
+    outbox:
+      schema:
+        payload-column-type: longtext
+        headers-column-type: longtext
+        last-error-column-type: longtext
+```
+
+`payload-storage: binary` is planned, not supported by the current runtime store. It fails fast until binary payload codec and `payload_bytes` read/write support are implemented.
 
 ## Publish An Event
 

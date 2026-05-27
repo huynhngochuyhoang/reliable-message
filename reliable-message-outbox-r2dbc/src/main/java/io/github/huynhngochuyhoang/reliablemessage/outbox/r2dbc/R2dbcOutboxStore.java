@@ -26,56 +26,83 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
     private final DatabaseClient databaseClient;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final OutboxSchema schema;
 
     public R2dbcOutboxStore(DatabaseClient databaseClient, ObjectMapper objectMapper) {
         this(databaseClient, objectMapper, Clock.systemUTC());
     }
 
     public R2dbcOutboxStore(DatabaseClient databaseClient, ObjectMapper objectMapper, Clock clock) {
+        this(databaseClient, objectMapper, clock, defaultSchema(databaseClient));
+    }
+
+    public R2dbcOutboxStore(DatabaseClient databaseClient, ObjectMapper objectMapper, Clock clock, OutboxSchema schema) {
         this.databaseClient = Objects.requireNonNull(databaseClient, "databaseClient must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.schema = Objects.requireNonNull(schema, "schema must not be null");
+    }
+
+    static OutboxSchema defaultSchema(DatabaseClient databaseClient) {
+        Objects.requireNonNull(databaseClient, "databaseClient must not be null");
+        OutboxDatabaseDialect dialect = OutboxDatabaseDialect.from(databaseClient.getConnectionFactory());
+        return new OutboxSchemaResolver(new R2dbcOutboxProperties()).resolve(dialect);
     }
 
     public Mono<Void> initializeSchema() {
-        return databaseClient.sql("""
-                        create table if not exists message_outbox (
-                            id varchar(64) primary key,
-                            event_name varchar(255) not null,
-                            aggregate_id varchar(255),
-                            idempotency_key varchar(255),
-                            partition_key varchar(255),
-                            payload text not null,
-                            headers text,
-                            status varchar(32) not null,
-                            retry_count int not null default 0,
-                            next_retry_at timestamp,
-                            processing_started_at timestamp,
-                            created_at timestamp not null,
-                            published_at timestamp,
-                            last_error text
-                        )
-                        """)
+        return databaseClient.sql(schemaDdl(schema))
                 .fetch()
                 .rowsUpdated()
                 .then();
     }
 
+    static String schemaDdl(OutboxSchema schema) {
+        Objects.requireNonNull(schema, "schema must not be null");
+        return """
+                create table if not exists message_outbox (
+                    id varchar(64) primary key,
+                    event_name varchar(255) not null,
+                    aggregate_id varchar(255),
+                    idempotency_key varchar(255),
+                    partition_key varchar(255),
+                    payload %s not null,
+                    payload_bytes %s,
+                    headers %s,
+                    status varchar(32) not null,
+                    retry_count int not null default 0,
+                    next_retry_at timestamp,
+                    processing_started_at timestamp,
+                    created_at timestamp not null,
+                    published_at timestamp,
+                    last_error %s
+                )
+                """.formatted(
+                schema.payloadColumnType(),
+                schema.payloadBytesColumnType(),
+                schema.headersColumnType(),
+                schema.lastErrorColumnType()
+        );
+    }
+
+    static String insertSql() {
+        return """
+                insert into message_outbox
+                (id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
+                 status, retry_count, next_retry_at, processing_started_at, created_at, published_at, last_error)
+                values (:id, :eventName, :aggregateId, :idempotencyKey, :partitionKey, :payload, :headers,
+                        :status, :retryCount, :nextRetryAt, :processingStartedAt, :createdAt, :publishedAt, :lastError)
+                """;
+    }
+
     @Override
     public Mono<Void> save(OutboxMessage message) {
         Objects.requireNonNull(message, "message must not be null");
-        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                        insert into message_outbox
-                        (id, event_name, aggregate_id, idempotency_key, partition_key, payload, headers,
-                         status, retry_count, next_retry_at, processing_started_at, created_at, published_at, last_error)
-                        values (:id, :eventName, :aggregateId, :idempotencyKey, :partitionKey, :payload, :headers,
-                                :status, :retryCount, :nextRetryAt, :processingStartedAt, :createdAt, :publishedAt, :lastError)
-                        """)
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(insertSql())
                 .bind("id", message.id())
-                .bind("eventName", message.eventName())
-                .bind("payload", toJson(message.payload()))
-                .bind("headers", toJson(message.headers()))
-                .bind("status", message.status().name())
+                .bind("eventName", message.eventName());
+        spec = schema.payloadBinder().bindPayload(spec, "payload", toJson(message.payload()));
+        spec = schema.payloadBinder().bindHeaders(spec, "headers", toJson(message.headers()));
+        spec = spec.bind("status", message.status().name())
                 .bind("retryCount", message.retryCount())
                 .bind("createdAt", localDateTime(message.createdAt()));
 
@@ -213,21 +240,25 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
     }
 
     private JsonNode readPayload(String json) {
-        try {
-            return objectMapper.readTree(json);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalStateException("Outbox payload is not valid JSON", ex);
-        }
+        return readJson(json, "Outbox payload is not valid JSON");
     }
 
     private Map<String, String> readHeaders(String json) {
         if (json == null || json.isBlank()) {
             return Map.of();
         }
+        JsonNode headers = readJson(json, "Outbox headers are not valid JSON");
+        if (headers.isTextual()) {
+            headers = readJson(headers.asText(), "Outbox headers are not valid JSON");
+        }
+        return objectMapper.convertValue(headers, STRING_MAP);
+    }
+
+    private JsonNode readJson(String json, String errorMessage) {
         try {
-            return objectMapper.readValue(json, STRING_MAP);
+            return objectMapper.readTree(json);
         } catch (JsonProcessingException ex) {
-            throw new IllegalStateException("Outbox headers are not valid JSON", ex);
+            throw new IllegalStateException(errorMessage, ex);
         }
     }
 

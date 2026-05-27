@@ -119,6 +119,8 @@ Rules:
 - Do not use JDBC or blocking Redis inside reactive pipelines.
 - Keep concurrency and prefetch bounded.
 
+R2DBC outbox schema DDL is configurable under `message.reliability.outbox.schema`. Column type resolution uses explicit user config first, dialect defaults second, and generic fallback last. `payload-storage=binary` is planned and currently fails fast until binary payload codec and `payload_bytes` read/write support are implemented.
+
 ## Rabbit WebFlux Blocking Bridge Publish Flow
 
 ```mermaid

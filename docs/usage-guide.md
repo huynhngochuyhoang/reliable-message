@@ -289,6 +289,78 @@ reliable-message-idempotency-r2dbc or reliable-message-idempotency-redis-reactiv
 
 R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
 
+### R2DBC Outbox Schema Configuration
+
+The R2DBC outbox can resolve payload, header, payload-bytes, and error column types from configuration and database dialect. Resolution order is:
+
+1. User explicit config.
+2. Dialect recommended default.
+3. Generic fallback.
+
+Storage mode:
+
+| Property | Values | Default | Notes |
+| --- | --- | --- | --- |
+| `message.reliability.outbox.schema.payload-storage` | `text`, `json`, `binary` | `text` | `text` and `json` are supported today. `binary` is planned and fails fast until runtime binary codec/storage support is implemented. |
+
+Advanced overrides:
+
+| Property | Purpose |
+| --- | --- |
+| `message.reliability.outbox.schema.payload-column-type` | Overrides the `payload` column type. |
+| `message.reliability.outbox.schema.headers-column-type` | Overrides the `headers` column type. |
+| `message.reliability.outbox.schema.payload-bytes-column-type` | Overrides the `payload_bytes` column type. |
+| `message.reliability.outbox.schema.last-error-column-type` | Overrides the `last_error` column type. |
+
+Dialect defaults:
+
+| Dialect | text payload | json payload/headers | planned binary payload bytes | last_error |
+| --- | --- | --- | --- | --- |
+| PostgreSQL | `text` | `jsonb` | `bytea` | `text` |
+| MySQL | `longtext` | `json` | `longblob` | `longtext` |
+| Oracle | `clob` | `clob` | `blob` | `clob` |
+| SQL Server | `nvarchar(max)` | `nvarchar(max)` | `varbinary(max)` | `nvarchar(max)` |
+| Generic fallback | `text` | `text` | `blob` | `text` |
+
+PostgreSQL JSON example:
+
+```yaml
+message:
+  reliability:
+    outbox:
+      enabled: true
+      schema:
+        payload-storage: json
+```
+
+SQL Server explicit override example:
+
+```yaml
+message:
+  reliability:
+    outbox:
+      enabled: true
+      schema:
+        payload-storage: text
+        payload-column-type: nvarchar(max)
+        headers-column-type: nvarchar(max)
+        last-error-column-type: nvarchar(max)
+```
+
+Binary mode planned example (fails fast today):
+
+```yaml
+message:
+  reliability:
+    outbox:
+      enabled: true
+      schema:
+        payload-storage: binary
+        payload-bytes-column-type: bytea
+```
+
+Binary mode is not supported by the current runtime store. Configuring `payload-storage: binary` fails fast with a clear startup error until a compatible payload codec and `payload_bytes` read/write path are implemented.
+
 Publish:
 
 ```java
