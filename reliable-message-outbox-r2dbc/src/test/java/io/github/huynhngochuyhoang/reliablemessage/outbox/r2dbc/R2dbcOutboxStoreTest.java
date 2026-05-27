@@ -5,17 +5,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.core.MessageStatus;
 import io.github.huynhngochuyhoang.reliablemessage.core.PublishOptions;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.OutboxMessage;
+import io.r2dbc.postgresql.codec.Json;
+import io.r2dbc.spi.Connection;
 import io.r2dbc.spi.ConnectionFactories;
 import io.r2dbc.spi.ConnectionFactory;
+import io.r2dbc.spi.ConnectionFactoryMetadata;
 import org.junit.jupiter.api.Test;
 import org.springframework.r2dbc.connection.R2dbcTransactionManager;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.transaction.reactive.TransactionalOperator;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -187,6 +194,30 @@ class R2dbcOutboxStoreTest {
 
         assertThat(schema.payloadBinder()).isInstanceOf(PostgresJsonOutboxPayloadBinder.class);
     }
+
+    @Test
+    void postgresqlJsonBinderBindsOnlyJsonColumnsAsJson() {
+        OutboxSchema schema = new OutboxSchema("text", "jsonb", "bytea", "text", OutboxDatabaseDialect.POSTGRESQL);
+        Map<String, Object> boundValues = new HashMap<>();
+        DatabaseClient.GenericExecuteSpec spec = recordingSpec(boundValues);
+
+        spec = schema.payloadBinder().bindPayload(spec, "payload", "{\"orderId\":\"order-1\"}");
+        schema.payloadBinder().bindHeaders(spec, "headers", "{\"traceId\":\"trace-1\"}");
+
+        assertThat(boundValues.get("payload")).isInstanceOf(String.class);
+        assertThat(boundValues.get("headers")).isInstanceOf(Json.class);
+    }
+
+    @Test
+    void defaultSchemaUsesConnectionFactoryDialect() {
+        DatabaseClient databaseClient = DatabaseClient.create(connectionFactory("PostgreSQL"));
+
+        OutboxSchema schema = R2dbcOutboxStore.defaultSchema(databaseClient);
+
+        assertThat(schema.dialect()).isEqualTo(OutboxDatabaseDialect.POSTGRESQL);
+        assertThat(schema.payloadBytesColumnType()).isEqualTo("bytea");
+    }
+
     @Test
     void postgresqlJsonModeInsertSqlStaysDialectNeutral() {
         String insertSql = R2dbcOutboxStore.insertSql();
@@ -216,8 +247,8 @@ class R2dbcOutboxStoreTest {
 
 
     @Test
-    void jsonSchemaSavesAndReadsPayloadAndHeaders() {
-        TestStore testStore = store(new OutboxSchema("json", "json", "bytea", "text"));
+    void jsonHeadersSchemaSavesAndReadsPayloadAndHeaders() {
+        TestStore testStore = store(new OutboxSchema("text", "json", "bytea", "text"));
 
         StepVerifier.create(testStore.store.initializeSchema()
                         .then(testStore.store.save(message("event-json")))
@@ -229,6 +260,7 @@ class R2dbcOutboxStoreTest {
                 })
                 .verifyComplete();
     }
+
     @Test
     void postgresqlJsonbSchemaUsesPostgresBinderAndCleanSql() {
         OutboxSchema schema = new OutboxSchema("jsonb", "jsonb", "bytea", "text", OutboxDatabaseDialect.POSTGRESQL);
@@ -273,13 +305,17 @@ class R2dbcOutboxStoreTest {
     }
 
     private static OutboxMessage message(String id) {
+        return message(id, new OrderCreated("order-1"));
+    }
+
+    private static OutboxMessage message(String id, Object payload) {
         return new OutboxMessage(
                 id,
                 "order.created",
                 "order-1",
                 "event-1",
                 "order-1",
-                new OrderCreated("order-1"),
+                payload,
                 PublishOptions.builder().correlationId("correlation-1").header("trace-id", "trace-1").build().headers(),
                 MessageStatus.PENDING,
                 0,
@@ -288,6 +324,42 @@ class R2dbcOutboxStoreTest {
                 null,
                 null
         );
+    }
+
+    private static DatabaseClient.GenericExecuteSpec recordingSpec(Map<String, Object> boundValues) {
+        Object[] proxy = new Object[1];
+        proxy[0] = Proxy.newProxyInstance(
+                DatabaseClient.GenericExecuteSpec.class.getClassLoader(),
+                new Class<?>[]{DatabaseClient.GenericExecuteSpec.class},
+                (ignored, method, args) -> {
+                    if ("bind".equals(method.getName()) && args != null && args.length == 2 && args[0] instanceof String name) {
+                        boundValues.put(name, args[1]);
+                        return proxy[0];
+                    }
+
+                    if (method.getReturnType().isInstance(proxy[0])) {
+                        return proxy[0];
+                    }
+
+                    throw new UnsupportedOperationException(method.getName());
+                });
+        return (DatabaseClient.GenericExecuteSpec) proxy[0];
+    }
+
+    private static ConnectionFactory connectionFactory(String name) {
+        return new ConnectionFactory() {
+            @Override
+            public org.reactivestreams.Publisher<? extends Connection> create() {
+                return Mono.error(new UnsupportedOperationException("not used"));
+            }
+
+
+            @Override
+            public ConnectionFactoryMetadata getMetadata() {
+                return () -> name;
+            }
+
+        };
     }
 
     private static reactor.core.publisher.Mono<Long> count(DatabaseClient databaseClient, String table) {

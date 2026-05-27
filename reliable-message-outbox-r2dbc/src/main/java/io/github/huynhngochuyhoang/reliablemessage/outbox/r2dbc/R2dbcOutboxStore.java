@@ -33,8 +33,7 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
     }
 
     public R2dbcOutboxStore(DatabaseClient databaseClient, ObjectMapper objectMapper, Clock clock) {
-        this(databaseClient, objectMapper, clock, new OutboxSchemaResolver(new R2dbcOutboxProperties())
-                .resolve(OutboxDatabaseDialect.GENERIC));
+        this(databaseClient, objectMapper, clock, defaultSchema(databaseClient));
     }
 
     public R2dbcOutboxStore(DatabaseClient databaseClient, ObjectMapper objectMapper, Clock clock, OutboxSchema schema) {
@@ -42,6 +41,12 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.schema = Objects.requireNonNull(schema, "schema must not be null");
+    }
+
+    static OutboxSchema defaultSchema(DatabaseClient databaseClient) {
+        Objects.requireNonNull(databaseClient, "databaseClient must not be null");
+        OutboxDatabaseDialect dialect = OutboxDatabaseDialect.from(databaseClient.getConnectionFactory());
+        return new OutboxSchemaResolver(new R2dbcOutboxProperties()).resolve(dialect);
     }
 
     public Mono<Void> initializeSchema() {
@@ -243,24 +248,18 @@ public class R2dbcOutboxStore implements ReactiveOutboxStore {
             return Map.of();
         }
         JsonNode headers = readJson(json, "Outbox headers are not valid JSON");
+        if (headers.isTextual()) {
+            headers = readJson(headers.asText(), "Outbox headers are not valid JSON");
+        }
         return objectMapper.convertValue(headers, STRING_MAP);
     }
 
     private JsonNode readJson(String json, String errorMessage) {
         try {
-            JsonNode value = objectMapper.readTree(json);
-            if (value.isTextual() && looksLikeNestedJson(value.asText())) {
-                return objectMapper.readTree(value.asText());
-            }
-            return value;
+            return objectMapper.readTree(json);
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException(errorMessage, ex);
         }
-    }
-
-    private static boolean looksLikeNestedJson(String value) {
-        String trimmed = value.trim();
-        return trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith("\"");
     }
 
     private String toJson(Object value) {

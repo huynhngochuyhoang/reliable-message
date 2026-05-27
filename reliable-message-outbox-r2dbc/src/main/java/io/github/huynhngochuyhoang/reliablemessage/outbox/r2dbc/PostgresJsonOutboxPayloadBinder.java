@@ -5,13 +5,25 @@ import org.springframework.r2dbc.core.DatabaseClient;
 
 public class PostgresJsonOutboxPayloadBinder implements OutboxPayloadBinder {
 
+    private final boolean payloadJson;
+    private final boolean headersJson;
+
+    public PostgresJsonOutboxPayloadBinder() {
+        this(true, true);
+    }
+
+    public PostgresJsonOutboxPayloadBinder(boolean payloadJson, boolean headersJson) {
+        this.payloadJson = payloadJson;
+        this.headersJson = headersJson;
+    }
+
     @Override
     public DatabaseClient.GenericExecuteSpec bindPayload(
             DatabaseClient.GenericExecuteSpec spec,
             String name,
             String jsonValue
     ) {
-        return spec.bind(name, Json.of(jsonValue));
+        return payloadJson ? spec.bind(name, Json.of(jsonValue)) : spec.bind(name, jsonValue);
     }
 
     @Override
@@ -20,6 +32,6 @@ public class PostgresJsonOutboxPayloadBinder implements OutboxPayloadBinder {
             String name,
             String jsonValue
     ) {
-        return spec.bind(name, Json.of(jsonValue));
+        return headersJson ? spec.bind(name, Json.of(jsonValue)) : spec.bind(name, jsonValue);
     }
 }

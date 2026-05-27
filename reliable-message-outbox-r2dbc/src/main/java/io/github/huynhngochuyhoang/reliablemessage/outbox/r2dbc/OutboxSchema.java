@@ -36,9 +36,10 @@ public record OutboxSchema(
             String headersColumnType
     ) {
         OutboxDatabaseDialect resolvedDialect = dialect == null ? OutboxDatabaseDialect.GENERIC : dialect;
-        if (resolvedDialect == OutboxDatabaseDialect.POSTGRESQL
-                && (isJsonColumn(payloadColumnType) || isJsonColumn(headersColumnType))) {
-            return new PostgresJsonOutboxPayloadBinder();
+        boolean payloadJson = isJsonColumn(payloadColumnType);
+        boolean headersJson = isJsonColumn(headersColumnType);
+        if (resolvedDialect == OutboxDatabaseDialect.POSTGRESQL && (payloadJson || headersJson)) {
+            return new PostgresJsonOutboxPayloadBinder(payloadJson, headersJson);
         }
         return new DefaultOutboxPayloadBinder();
     }
