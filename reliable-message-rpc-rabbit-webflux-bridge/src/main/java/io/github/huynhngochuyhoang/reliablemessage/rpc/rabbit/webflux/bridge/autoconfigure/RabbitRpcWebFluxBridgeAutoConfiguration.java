@@ -1,8 +1,6 @@
 package io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.autoconfigure;
 
-import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.RabbitRpcWebFluxBridgeProperties;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.ReactiveRabbitRpcClient;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.UnsupportedReactiveRabbitRpcClient;
+import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.*;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -23,10 +21,21 @@ import org.springframework.context.annotation.Bean;
 @EnableConfigurationProperties(RabbitRpcWebFluxBridgeProperties.class)
 public class RabbitRpcWebFluxBridgeAutoConfiguration {
 
+    @Bean(destroyMethod = "close")
+    @ConditionalOnBean(AsyncRabbitTemplate.class)
+    @ConditionalOnMissingBean
+    RabbitRpcBridgeExecutorProvider rabbitRpcBridgeExecutorProvider(RabbitRpcWebFluxBridgeProperties properties) {
+        return new PlatformThreadRabbitRpcBridgeExecutorProvider(properties);
+    }
+
     @Bean
     @ConditionalOnBean(AsyncRabbitTemplate.class)
     @ConditionalOnMissingBean
-    ReactiveRabbitRpcClient reactiveRabbitRpcClient(AsyncRabbitTemplate asyncRabbitTemplate) {
-        return new UnsupportedReactiveRabbitRpcClient(asyncRabbitTemplate);
+    ReactiveRabbitRpcClient reactiveRabbitRpcClient(
+            AsyncRabbitTemplate asyncRabbitTemplate,
+            RabbitRpcWebFluxBridgeProperties properties,
+            RabbitRpcBridgeExecutorProvider executorProvider
+    ) {
+        return new DefaultReactiveRabbitRpcClient(asyncRabbitTemplate, properties, executorProvider);
     }
 }

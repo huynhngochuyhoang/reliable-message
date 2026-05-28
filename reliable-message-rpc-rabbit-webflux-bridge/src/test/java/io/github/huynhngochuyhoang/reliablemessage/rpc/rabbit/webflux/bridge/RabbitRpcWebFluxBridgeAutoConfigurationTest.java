@@ -7,8 +7,11 @@ import io.github.huynhngochuyhoang.reliablemessage.webflux.OutboxMessage;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveOutboxStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.connection.Connection;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.connection.ConnectionListener;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -32,9 +35,14 @@ class RabbitRpcWebFluxBridgeAutoConfigurationTest {
     void createsReactiveRabbitRpcClientOnlyWhenAsyncRabbitTemplateExists() {
         contextRunner
                 .withBean(AsyncRabbitTemplate.class, RabbitRpcWebFluxBridgeAutoConfigurationTest::asyncRabbitTemplate)
-                .run(context -> assertThat(context)
-                        .hasSingleBean(RabbitRpcWebFluxBridgeProperties.class)
-                        .hasSingleBean(ReactiveRabbitRpcClient.class));
+                .run(context -> {
+                    assertThat(context)
+                            .hasSingleBean(RabbitRpcWebFluxBridgeProperties.class)
+                            .hasSingleBean(RabbitRpcBridgeExecutorProvider.class)
+                            .hasSingleBean(ReactiveRabbitRpcClient.class);
+                    assertThat(context.getBean(ReactiveRabbitRpcClient.class))
+                            .isInstanceOf(DefaultReactiveRabbitRpcClient.class);
+                });
     }
 
     @Test
@@ -89,12 +97,14 @@ class RabbitRpcWebFluxBridgeAutoConfigurationTest {
     }
 
     @Test
-    void mainSourcesDoNotUseRabbitTemplateOutboxOrEventBridgeClasses() throws IOException {
+    void mainSourcesDoNotUseBlockingTemplateOutboxOrEventBridgeClasses() throws IOException {
         String source = mainSources();
 
         assertThat(source)
-                .doesNotContain("import org.springframework.amqp.rabbit.core.RabbitTemplate")
-                .doesNotContain("new RabbitTemplate")
+                .doesNotContain("import org.springframework.amqp.rabbit.core." + "Rabbit" + "Template")
+                .doesNotContain("new " + "Rabbit" + "Template")
+                .doesNotContain(".block(")
+                .doesNotContain(".join(")
                 .contains("AsyncRabbitTemplate")
                 .doesNotContain("ReactiveOutboxStore")
                 .doesNotContain("ReactiveOutboxFlushScheduler")
@@ -111,12 +121,12 @@ class RabbitRpcWebFluxBridgeAutoConfigurationTest {
     }
 
     private static AsyncRabbitTemplate asyncRabbitTemplate() {
-        return new RecordingAsyncRabbitTemplate();
+        return new NonStartingAsyncRabbitTemplate();
     }
 
-    private static final class RecordingAsyncRabbitTemplate extends AsyncRabbitTemplate {
-        private RecordingAsyncRabbitTemplate() {
-            super(new RabbitTemplate());
+    private static final class NonStartingAsyncRabbitTemplate extends AsyncRabbitTemplate {
+        private NonStartingAsyncRabbitTemplate() {
+            super(new StubConnectionFactory(), "", "");
         }
 
         @Override
@@ -129,12 +139,52 @@ class RabbitRpcWebFluxBridgeAutoConfigurationTest {
         }
     }
 
+    private static final class StubConnectionFactory implements ConnectionFactory {
+        @Override
+        public Connection createConnection() throws AmqpException {
+            throw new UnsupportedOperationException("not used");
+        }
+
+        @Override
+        public String getHost() {
+            return "localhost";
+        }
+
+        @Override
+        public int getPort() {
+            return 5672;
+        }
+
+        @Override
+        public String getVirtualHost() {
+            return "/";
+        }
+
+        @Override
+        public String getUsername() {
+            return "guest";
+        }
+
+        @Override
+        public void addConnectionListener(ConnectionListener listener) {
+        }
+
+        @Override
+        public boolean removeConnectionListener(ConnectionListener listener) {
+            return false;
+        }
+
+        @Override
+        public void clearConnectionListeners() {
+        }
+    }
+
     private static String mainSources() throws IOException {
         Path root = Path.of("src/main/java");
         StringBuilder source = new StringBuilder();
         try (var paths = Files.walk(root)) {
             for (Path path : paths.filter(Files::isRegularFile).toList()) {
-                source.append(Files.readString(path)).append('\n');
+                source.append(Files.readString(path)).append(System.lineSeparator());
             }
         }
         return source.toString();
