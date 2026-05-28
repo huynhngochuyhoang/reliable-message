@@ -9,9 +9,11 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.ResolvableType;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -22,14 +24,24 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
 
     private final AsyncAmqpTemplate asyncRabbitTemplate;
     private final RabbitRpcWebFluxBridgeProperties properties;
-    private final Scheduler rpcScheduler;
+    private final RabbitRpcBridgeExecutorProvider executorProvider;
 
     public DefaultReactiveRabbitRpcClient(
             AsyncRabbitTemplate asyncRabbitTemplate,
             RabbitRpcWebFluxBridgeProperties properties,
             RabbitRpcBridgeExecutorProvider executorProvider
     ) {
-        this((AsyncAmqpTemplate) asyncRabbitTemplate, properties, executorProvider.scheduler());
+        this((AsyncAmqpTemplate) asyncRabbitTemplate, properties, executorProvider);
+    }
+
+    DefaultReactiveRabbitRpcClient(
+            AsyncAmqpTemplate asyncRabbitTemplate,
+            RabbitRpcWebFluxBridgeProperties properties,
+            RabbitRpcBridgeExecutorProvider executorProvider
+    ) {
+        this.asyncRabbitTemplate = Objects.requireNonNull(asyncRabbitTemplate, "asyncRabbitTemplate must not be null");
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.executorProvider = Objects.requireNonNull(executorProvider, "executorProvider must not be null");
     }
 
     DefaultReactiveRabbitRpcClient(
@@ -37,18 +49,29 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
             RabbitRpcWebFluxBridgeProperties properties,
             Scheduler rpcScheduler
     ) {
-        this.asyncRabbitTemplate = Objects.requireNonNull(asyncRabbitTemplate, "asyncRabbitTemplate must not be null");
-        this.properties = Objects.requireNonNull(properties, "properties must not be null");
-        this.rpcScheduler = Objects.requireNonNull(rpcScheduler, "rpcScheduler must not be null");
+        this(asyncRabbitTemplate, properties, new SchedulerBackedRabbitRpcBridgeExecutorProvider(rpcScheduler));
     }
 
     @Override
     public <T> Mono<T> request(String route, Object request, Class<T> responseType) {
+        Objects.requireNonNull(responseType, "responseType must not be null");
+        return request(route, request, ParameterizedTypeReference.forType(responseType), RpcOptions.of(properties.getResponseMode()));
+    }
+
+    @Override
+    public <T> Mono<T> request(
+            String route,
+            Object request,
+            ParameterizedTypeReference<T> responseType,
+            RpcOptions options
+    ) {
         if (route == null || route.isBlank()) {
             throw new IllegalArgumentException("route must not be blank");
         }
         Objects.requireNonNull(responseType, "responseType must not be null");
-        RpcTimeoutPolicy timeoutPolicy = new RpcTimeoutPolicy(properties.getDefaultTimeout());
+        RpcOptions effectiveOptions = options == null ? RpcOptions.of(properties.getResponseMode()) : options;
+        Duration timeout = effectiveOptions.timeoutOr(properties.getDefaultTimeout());
+        RpcTimeoutPolicy timeoutPolicy = new RpcTimeoutPolicy(timeout);
 
         return Mono.deferContextual(contextView -> {
             RpcContext rpcContext = ReactiveRpcContext.current(contextView).orElse(RpcContext.empty());
@@ -56,26 +79,85 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
             String correlationId = correlationId(headers);
             headers.putIfAbsent(RpcHeaders.CORRELATION_ID, correlationId);
             MessagePostProcessor postProcessor = message -> withRpcHeaders(message, correlationId, headers);
-            ParameterizedTypeReference<T> returnType = ParameterizedTypeReference.forType(responseType);
 
-            Mono<T> result = Mono.defer(() -> {
-                CompletableFuture<T> future = asyncRabbitTemplate.convertSendAndReceiveAsType(
-                        properties.getExchange(),
-                        route,
-                        request,
-                        postProcessor,
-                        returnType
-                );
-
-                // Phase 14.10 propagates transport, future-completion, and conversion failures only.
-                // TODO: map application-level RPC error envelopes in a later phase.
-                return Mono.fromFuture(future)
-                        .doOnCancel(() -> future.cancel(true));
-            }).subscribeOn(rpcScheduler);
+            Mono<T> result = switch (effectiveOptions.responseMode()) {
+                case RAW -> rawRequest(route, request, responseType, postProcessor);
+                case ENVELOPE -> envelopeRequest(route, request, responseType, postProcessor);
+            };
 
             // Reactor timeout cancels the local future, but RabbitMQ may still process a request already accepted by the broker.
             return result.timeout(timeoutPolicy.requestTimeout());
         });
+    }
+
+    private <T> Mono<T> rawRequest(
+            String route,
+            Object request,
+            ParameterizedTypeReference<T> responseType,
+            MessagePostProcessor postProcessor
+    ) {
+        return executorProvider.execute(() -> asyncRabbitTemplate.convertSendAndReceiveAsType(
+                properties.getExchange(),
+                route,
+                request,
+                postProcessor,
+                responseType
+        ));
+    }
+
+    private <T> Mono<T> envelopeRequest(
+            String route,
+            Object request,
+            ParameterizedTypeReference<T> responseType,
+            MessagePostProcessor postProcessor
+    ) {
+        ParameterizedTypeReference<RpcResponseEnvelope<T>> envelopeType = envelopeType(responseType);
+        return executorProvider.execute(() -> envelopeFuture(route, request, postProcessor, envelopeType))
+                .flatMap(this::unwrapEnvelope);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private <T> CompletableFuture<Object> envelopeFuture(
+            String route,
+            Object request,
+            MessagePostProcessor postProcessor,
+            ParameterizedTypeReference<RpcResponseEnvelope<T>> envelopeType
+    ) {
+        CompletableFuture future = asyncRabbitTemplate.convertSendAndReceiveAsType(
+                properties.getExchange(),
+                route,
+                request,
+                postProcessor,
+                envelopeType
+        );
+        // Phase 14.10.1 maps only the explicit application-level envelope protocol.
+        // Transport, future, and conversion failures still propagate as-is.
+        return future;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> ParameterizedTypeReference<RpcResponseEnvelope<T>> envelopeType(ParameterizedTypeReference<T> responseType) {
+        ResolvableType payloadType = ResolvableType.forType(responseType.getType());
+        ResolvableType envelopeType = ResolvableType.forClassWithGenerics(RpcResponseEnvelope.class, payloadType);
+        return (ParameterizedTypeReference<RpcResponseEnvelope<T>>) (Object) ParameterizedTypeReference.forType(envelopeType.getType());
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> Mono<T> unwrapEnvelope(Object reply) {
+        if (!(reply instanceof RpcResponseEnvelope<?> envelope)) {
+            return Mono.error(new IllegalStateException("RPC envelope response is malformed"));
+        }
+        if (envelope.getStatus() == RpcResponseEnvelope.RpcEnvelopeStatus.SUCCESS) {
+            return Mono.justOrEmpty((T) envelope.getPayload());
+        }
+        if (envelope.getStatus() == RpcResponseEnvelope.RpcEnvelopeStatus.ERROR) {
+            return Mono.error(new RabbitRpcRemoteException(
+                    envelope.getErrorCode(),
+                    envelope.getErrorMessage(),
+                    envelope.getErrorType()
+            ));
+        }
+        return Mono.error(new IllegalStateException("RPC envelope response is malformed"));
     }
 
     private static Map<String, String> headers(RpcContext rpcContext) {
@@ -95,5 +177,15 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
             }
         });
         return message;
+    }
+
+    private record SchedulerBackedRabbitRpcBridgeExecutorProvider(Scheduler scheduler) implements RabbitRpcBridgeExecutorProvider {
+        private SchedulerBackedRabbitRpcBridgeExecutorProvider {
+            Objects.requireNonNull(scheduler, "scheduler must not be null");
+        }
+
+        @Override
+        public void close() {
+        }
     }
 }

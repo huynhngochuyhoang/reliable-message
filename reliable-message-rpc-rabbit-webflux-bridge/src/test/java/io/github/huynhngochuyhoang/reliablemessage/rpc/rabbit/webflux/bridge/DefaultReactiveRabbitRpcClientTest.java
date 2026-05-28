@@ -18,6 +18,7 @@ import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +42,65 @@ class DefaultReactiveRabbitRpcClientTest {
         assertThat(template.routingKey).isEqualTo("orders.lookup");
         assertThat(template.request).isEqualTo("request");
         assertThat(template.responseType.getType()).isEqualTo(String.class);
+    }
+
+    @Test
+    void parameterizedResponseTypeIsSentThroughAsyncRabbitTemplate() {
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        OrderResponse response = new OrderResponse("order-1");
+        template.nextFuture.complete(List.of(response));
+        DefaultReactiveRabbitRpcClient client = client(template, Duration.ofSeconds(5), "");
+        ParameterizedTypeReference<List<OrderResponse>> responseType = new ParameterizedTypeReference<>() {
+        };
+
+        StepVerifier.create(client.request("orders.lookup", "request", responseType, RpcOptions.raw()))
+                .expectNext(List.of(response))
+                .verifyComplete();
+
+        assertThat(template.responseType.getType()).isEqualTo(responseType.getType());
+    }
+
+    @Test
+    void successEnvelopeReturnsPayload() {
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        OrderResponse response = new OrderResponse("order-1");
+        template.nextFuture.complete(RpcResponseEnvelope.success(response));
+        DefaultReactiveRabbitRpcClient client = client(template, Duration.ofSeconds(5), "");
+
+        StepVerifier.create(client.request("orders.lookup", "request", OrderResponse.class, RpcOptions.envelope()))
+                .expectNext(response)
+                .verifyComplete();
+    }
+
+    @Test
+    void errorEnvelopeMapsToRemoteException() {
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        template.nextFuture.complete(RpcResponseEnvelope.error("ORDER_NOT_FOUND", "Order missing", "NotFound"));
+        DefaultReactiveRabbitRpcClient client = client(template, Duration.ofSeconds(5), "");
+
+        StepVerifier.create(client.request("orders.lookup", "request", OrderResponse.class, RpcOptions.envelope()))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOf(RabbitRpcRemoteException.class)
+                        .satisfies(remote -> {
+                            RabbitRpcRemoteException exception = (RabbitRpcRemoteException) remote;
+                            assertThat(exception.getErrorCode()).isEqualTo("ORDER_NOT_FOUND");
+                            assertThat(exception.getErrorMessage()).isEqualTo("Order missing");
+                            assertThat(exception.getErrorType()).isEqualTo("NotFound");
+                        }))
+                .verify();
+    }
+
+    @Test
+    void malformedEnvelopePropagatesConversionError() {
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        template.nextFuture.complete("not-an-envelope");
+        DefaultReactiveRabbitRpcClient client = client(template, Duration.ofSeconds(5), "");
+
+        StepVerifier.create(client.request("orders.lookup", "request", OrderResponse.class, RpcOptions.envelope()))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("RPC envelope"))
+                .verify();
     }
 
     @Test
@@ -95,6 +155,26 @@ class DefaultReactiveRabbitRpcClientTest {
     }
 
     @Test
+    void virtualThreadExecutorOffloadsWithRpcThreadName() {
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        RabbitRpcWebFluxBridgeProperties properties = new RabbitRpcWebFluxBridgeProperties();
+        properties.setExecutorMode(RabbitRpcExecutorMode.VIRTUAL_THREAD);
+        properties.setMaxConcurrency(1);
+
+        try (RabbitRpcBridgeExecutorProvider provider = RabbitRpcBridgeExecutorProvider.create(properties)) {
+            DefaultReactiveRabbitRpcClient client = new DefaultReactiveRabbitRpcClient(template, properties, provider);
+
+            StepVerifier.create(client.request("orders.lookup", "request", String.class))
+                    .then(() -> assertThat(template.awaitInvocation()).isTrue())
+                    .then(() -> template.nextFuture.complete("reply"))
+                    .expectNext("reply")
+                    .verifyComplete();
+
+            assertThat(template.invocationThread).startsWith("rabbit-rpc-bridge-virtual-");
+        }
+    }
+
+    @Test
     void timeoutFailsReturnedMonoWithTimeoutClassifiedError() {
         RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
         DefaultReactiveRabbitRpcClient client = client(template, Duration.ofMillis(10), "");
@@ -121,6 +201,88 @@ class DefaultReactiveRabbitRpcClientTest {
             assertThat(template.nextFuture.isCancelled()).isTrue();
         } finally {
             scheduler.dispose();
+        }
+    }
+
+    @Test
+    void maxConcurrencyRejectsWhenSaturated() {
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        RabbitRpcWebFluxBridgeProperties properties = new RabbitRpcWebFluxBridgeProperties();
+        properties.setMaxConcurrency(1);
+
+        try (RabbitRpcBridgeExecutorProvider provider = RabbitRpcBridgeExecutorProvider.create(properties)) {
+            DefaultReactiveRabbitRpcClient client = new DefaultReactiveRabbitRpcClient(template, properties, provider);
+            Disposable firstSubscription = client.request("orders.lookup", "request", String.class).subscribe();
+            assertThat(template.awaitInvocation()).isTrue();
+
+            StepVerifier.create(client.request("orders.lookup", "request", String.class))
+                    .expectError(RabbitRpcBridgeRejectedException.class)
+                    .verify();
+
+            firstSubscription.dispose();
+        }
+    }
+
+    @Test
+    void maxConcurrencyPermitReleasesAfterSuccessFailureTimeoutCancellationAndExecutorRejection() {
+        RabbitRpcWebFluxBridgeProperties properties = new RabbitRpcWebFluxBridgeProperties();
+        properties.setMaxConcurrency(1);
+
+        try (RabbitRpcBridgeExecutorProvider provider = RabbitRpcBridgeExecutorProvider.create(properties)) {
+            RecordingAsyncAmqpTemplate successTemplate = new RecordingAsyncAmqpTemplate();
+            successTemplate.nextFuture.complete("ok");
+            StepVerifier.create(new DefaultReactiveRabbitRpcClient(successTemplate, properties, provider)
+                            .request("orders.lookup", "request", String.class))
+                    .expectNext("ok")
+                    .verifyComplete();
+
+            RecordingAsyncAmqpTemplate failureTemplate = new RecordingAsyncAmqpTemplate();
+            RuntimeException failure = new RuntimeException("broker failure");
+            failureTemplate.nextFuture.completeExceptionally(failure);
+            StepVerifier.create(new DefaultReactiveRabbitRpcClient(failureTemplate, properties, provider)
+                            .request("orders.lookup", "request", String.class))
+                    .expectErrorMatches(error -> error == failure)
+                    .verify();
+
+            RecordingAsyncAmqpTemplate timeoutTemplate = new RecordingAsyncAmqpTemplate();
+            RabbitRpcWebFluxBridgeProperties timeoutProperties = new RabbitRpcWebFluxBridgeProperties();
+            timeoutProperties.setDefaultTimeout(Duration.ofMillis(10));
+            timeoutProperties.setMaxConcurrency(1);
+            StepVerifier.withVirtualTime(() -> new DefaultReactiveRabbitRpcClient(timeoutTemplate, timeoutProperties, provider)
+                            .request("orders.lookup", "request", String.class))
+                    .thenAwait(Duration.ofMillis(10))
+                    .expectErrorSatisfies(error -> assertThat(RpcExceptionClassifier.defaults().timeout(error)).isTrue())
+                    .verify();
+
+            RecordingAsyncAmqpTemplate cancellationTemplate = new RecordingAsyncAmqpTemplate();
+            Disposable subscription = new DefaultReactiveRabbitRpcClient(cancellationTemplate, properties, provider)
+                    .request("orders.lookup", "request", String.class)
+                    .subscribe();
+            assertThat(cancellationTemplate.awaitInvocation()).isTrue();
+            subscription.dispose();
+
+            RecordingAsyncAmqpTemplate afterCancellationTemplate = new RecordingAsyncAmqpTemplate();
+            afterCancellationTemplate.nextFuture.complete("after-cancel");
+            StepVerifier.create(new DefaultReactiveRabbitRpcClient(afterCancellationTemplate, properties, provider)
+                            .request("orders.lookup", "request", String.class))
+                    .expectNext("after-cancel")
+                    .verifyComplete();
+        }
+        RabbitRpcBridgeExecutorProvider closedProvider = RabbitRpcBridgeExecutorProvider.create(properties);
+        closedProvider.close();
+        RecordingAsyncAmqpTemplate rejectedTemplate = new RecordingAsyncAmqpTemplate();
+        StepVerifier.create(new DefaultReactiveRabbitRpcClient(rejectedTemplate, properties, closedProvider)
+                        .request("orders.lookup", "request", String.class))
+                .expectError(RabbitRpcBridgeRejectedException.class)
+                .verify();
+
+        RecordingAsyncAmqpTemplate afterRejectionTemplate = new RecordingAsyncAmqpTemplate();
+        afterRejectionTemplate.nextFuture.complete("after-rejection");
+        try (RabbitRpcBridgeExecutorProvider provider = RabbitRpcBridgeExecutorProvider.create(properties)) {
+            StepVerifier.create(new DefaultReactiveRabbitRpcClient(afterRejectionTemplate, properties, provider)
+                            .request("orders.lookup", "request", String.class))
+                    .expectNext("after-rejection")
+                    .verifyComplete();
         }
     }
 
@@ -235,6 +397,18 @@ class DefaultReactiveRabbitRpcClientTest {
         assertThatThrownBy(() -> properties.setDefaultTimeout(Duration.ofMillis(-1)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("defaultTimeout must be positive");
+    }
+
+    @Test
+    void invalidExecutorPropertiesFailValidation() {
+        RabbitRpcWebFluxBridgeProperties properties = new RabbitRpcWebFluxBridgeProperties();
+
+        assertThatThrownBy(() -> properties.setExecutorMode(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("executorMode must not be null");
+        assertThatThrownBy(() -> properties.setMaxConcurrency(0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("maxConcurrency must be positive");
     }
 
     private static DefaultReactiveRabbitRpcClient client(
@@ -400,5 +574,8 @@ class DefaultReactiveRabbitRpcClientTest {
         ) {
             throw new UnsupportedOperationException("not used");
         }
+    }
+
+    private record OrderResponse(String id) {
     }
 }
