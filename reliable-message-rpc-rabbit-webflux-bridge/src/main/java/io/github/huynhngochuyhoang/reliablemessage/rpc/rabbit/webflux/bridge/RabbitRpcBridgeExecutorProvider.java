@@ -7,6 +7,7 @@ import reactor.core.scheduler.Scheduler;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public interface RabbitRpcBridgeExecutorProvider extends AutoCloseable {
@@ -15,9 +16,11 @@ public interface RabbitRpcBridgeExecutorProvider extends AutoCloseable {
 
     default <T> Mono<T> execute(Callable<CompletableFuture<T>> task) {
         return Mono.create(sink -> {
+            AtomicBoolean cancelled = new AtomicBoolean();
             AtomicReference<CompletableFuture<T>> futureRef = new AtomicReference<>();
             AtomicReference<Disposable> scheduledRef = new AtomicReference<>();
             sink.onCancel(() -> {
+                cancelled.set(true);
                 CompletableFuture<T> future = futureRef.get();
                 if (future != null) {
                     future.cancel(true);
@@ -30,9 +33,15 @@ public interface RabbitRpcBridgeExecutorProvider extends AutoCloseable {
 
             try {
                 Disposable scheduled = scheduler().schedule(() -> {
+                    if (cancelled.get()) {
+                        return;
+                    }
                     try {
                         CompletableFuture<T> future = task.call();
                         futureRef.set(future);
+                        if (cancelled.get()) {
+                            future.cancel(true);
+                        }
                         future.whenComplete((value, error) -> {
                             if (error != null) {
                                 sink.error(error);
@@ -48,6 +57,9 @@ public interface RabbitRpcBridgeExecutorProvider extends AutoCloseable {
                     }
                 });
                 scheduledRef.set(scheduled);
+                if (cancelled.get()) {
+                    scheduled.dispose();
+                }
             } catch (RejectedExecutionException error) {
                 sink.error(new RabbitRpcBridgeRejectedException("Rabbit RPC bridge executor rejected request", error));
             }

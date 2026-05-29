@@ -1,7 +1,10 @@
 package io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge;
 
 import org.junit.jupiter.api.Test;
+import org.reactivestreams.Subscription;
 import reactor.core.Disposable;
+import reactor.core.publisher.BaseSubscriber;
+import reactor.core.scheduler.Scheduler;
 import reactor.test.StepVerifier;
 
 import java.util.concurrent.CompletableFuture;
@@ -9,6 +12,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -80,6 +84,38 @@ class RabbitRpcBridgeExecutorProviderTest {
                     .verifyComplete();
             assertThat(queuedCalls).hasValue(0);
         }
+    }
+
+    @Test
+    void defaultExecuteSkipsScheduledTaskWhenCancellationWinsBeforeDisposableIsStored() {
+        AtomicReference<Subscription> subscriptionRef = new AtomicReference<>();
+        AtomicInteger calls = new AtomicInteger();
+        InterleavingScheduler scheduler = new InterleavingScheduler(() -> subscriptionRef.get().cancel());
+        RabbitRpcBridgeExecutorProvider provider = new RabbitRpcBridgeExecutorProvider() {
+            @Override
+            public Scheduler scheduler() {
+                return scheduler;
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+
+        provider.execute(() -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture("late");
+        }).subscribe(new BaseSubscriber<>() {
+            @Override
+            protected void hookOnSubscribe(Subscription subscription) {
+                subscriptionRef.set(subscription);
+                request(Long.MAX_VALUE);
+            }
+        });
+
+        scheduler.runScheduled();
+
+        assertThat(calls).hasValue(0);
     }
 
     @Test
@@ -202,6 +238,34 @@ class RabbitRpcBridgeExecutorProviderTest {
             StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("third")))
                     .expectNext("third")
                     .verifyComplete();
+        }
+    }
+
+    private static final class InterleavingScheduler implements Scheduler {
+        private final Runnable afterAccept;
+        private Runnable scheduled;
+        private boolean disposed;
+
+        private InterleavingScheduler(Runnable afterAccept) {
+            this.afterAccept = afterAccept;
+        }
+
+        @Override
+        public Disposable schedule(Runnable task) {
+            this.scheduled = task;
+            afterAccept.run();
+            return () -> disposed = true;
+        }
+
+        private void runScheduled() {
+            if (!disposed && scheduled != null) {
+                scheduled.run();
+            }
+        }
+
+        @Override
+        public Worker createWorker() {
+            throw new UnsupportedOperationException("not used");
         }
     }
 
