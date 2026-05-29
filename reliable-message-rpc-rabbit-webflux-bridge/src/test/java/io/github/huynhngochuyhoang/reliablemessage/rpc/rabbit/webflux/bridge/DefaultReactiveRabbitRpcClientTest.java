@@ -61,6 +61,15 @@ class DefaultReactiveRabbitRpcClientTest {
     }
 
     @Test
+    void customClientCanImplementOnlyClassOverload() {
+        ReactiveRabbitRpcClient client = new ClassOnlyReactiveRabbitRpcClient();
+
+        StepVerifier.create(client.request("orders.lookup", "request", String.class, RpcOptions.raw()))
+                .expectNext("legacy")
+                .verifyComplete();
+    }
+
+    @Test
     void successEnvelopeReturnsPayload() {
         RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
         OrderResponse response = new OrderResponse("order-1");
@@ -573,6 +582,15 @@ class DefaultReactiveRabbitRpcClientTest {
                 ParameterizedTypeReference<C> responseType
         ) {
             throw new UnsupportedOperationException("not used");
+        }
+    }
+
+    private static final class ClassOnlyReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T> Mono<T> request(String route, Object request, Class<T> responseType) {
+            return Mono.just((T) "legacy");
         }
     }
 

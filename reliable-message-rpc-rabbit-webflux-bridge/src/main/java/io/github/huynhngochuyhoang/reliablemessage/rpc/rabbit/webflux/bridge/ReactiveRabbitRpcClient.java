@@ -8,13 +8,20 @@ public interface ReactiveRabbitRpcClient {
     <T> Mono<T> request(String route, Object request, Class<T> responseType);
 
     default <T> Mono<T> request(String route, Object request, Class<T> responseType, RpcOptions options) {
-        return request(route, request, ParameterizedTypeReference.forType(responseType), options);
+        return request(route, request, responseType);
     }
 
-    <T> Mono<T> request(
+    default <T> Mono<T> request(
             String route,
             Object request,
             ParameterizedTypeReference<T> responseType,
             RpcOptions options
-    );
+    ) {
+        if (responseType.getType() instanceof Class<?> type) {
+            @SuppressWarnings("unchecked")
+            Class<T> responseClass = (Class<T>) type;
+            return request(route, request, responseClass);
+        }
+        return Mono.error(new UnsupportedOperationException("Parameterized RPC response types require a ReactiveRabbitRpcClient implementation that supports ParameterizedTypeReference"));
+    }
 }

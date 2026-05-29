@@ -8,6 +8,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,6 +41,44 @@ class RabbitRpcBridgeExecutorProviderTest {
             StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("third")))
                     .expectNext("third")
                     .verifyComplete();
+        }
+    }
+
+    @Test
+    void queuedCancellationSkipsTaskCallAndReleasesPermit() throws Exception {
+        RabbitRpcWebFluxBridgeProperties properties = properties();
+        properties.setExecutorThreads(1);
+        properties.setExecutorQueueCapacity(1);
+        properties.setMaxConcurrency(2);
+        CountDownLatch runningTaskStarted = new CountDownLatch(1);
+        CountDownLatch releaseRunningTask = new CountDownLatch(1);
+        AtomicInteger queuedCalls = new AtomicInteger();
+
+        try (RabbitRpcBridgeExecutorProvider provider = RabbitRpcBridgeExecutorProvider.create(properties)) {
+            Disposable runningSubscription = provider.execute(() -> {
+                runningTaskStarted.countDown();
+                releaseRunningTask.await(2, TimeUnit.SECONDS);
+                return CompletableFuture.completedFuture("running");
+            }).subscribe();
+            assertThat(runningTaskStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+            Disposable queuedSubscription = provider.execute(() -> {
+                queuedCalls.incrementAndGet();
+                return CompletableFuture.completedFuture("queued");
+            }).subscribe();
+            queuedSubscription.dispose();
+
+            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("saturated")))
+                    .expectError(RabbitRpcBridgeRejectedException.class)
+                    .verify();
+
+            releaseRunningTask.countDown();
+            runningSubscription.dispose();
+
+            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("after-skip")))
+                    .expectNext("after-skip")
+                    .verifyComplete();
+            assertThat(queuedCalls).hasValue(0);
         }
     }
 

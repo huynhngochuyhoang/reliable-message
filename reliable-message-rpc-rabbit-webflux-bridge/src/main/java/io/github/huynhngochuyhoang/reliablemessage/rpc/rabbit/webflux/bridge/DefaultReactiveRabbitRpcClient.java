@@ -59,6 +59,12 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
     }
 
     @Override
+    public <T> Mono<T> request(String route, Object request, Class<T> responseType, RpcOptions options) {
+        Objects.requireNonNull(responseType, "responseType must not be null");
+        return request(route, request, ParameterizedTypeReference.forType(responseType), options);
+    }
+
+    @Override
     public <T> Mono<T> request(
             String route,
             Object request,

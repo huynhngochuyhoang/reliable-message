@@ -53,6 +53,10 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
             try {
                 executor.execute(() -> {
                     try {
+                        if (cancelled.get()) {
+                            release.run();
+                            return;
+                        }
                         CompletableFuture<T> future = task.call();
                         futureRef.set(future);
                         if (cancelled.get()) {
