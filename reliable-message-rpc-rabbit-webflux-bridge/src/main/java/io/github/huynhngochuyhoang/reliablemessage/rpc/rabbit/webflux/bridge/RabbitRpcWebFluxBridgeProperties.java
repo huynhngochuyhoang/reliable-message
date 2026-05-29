@@ -12,6 +12,9 @@ public class RabbitRpcWebFluxBridgeProperties {
     private String exchange = "";
     private int executorThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
     private int executorQueueCapacity = 1000;
+    private RabbitRpcExecutorMode executorMode = RabbitRpcExecutorMode.PLATFORM;
+    private int maxConcurrency = 100;
+    private RpcResponseMode responseMode = RpcResponseMode.RAW;
 
     public boolean isEnabled() {
         return enabled;
@@ -60,5 +63,38 @@ public class RabbitRpcWebFluxBridgeProperties {
             throw new IllegalArgumentException("executorQueueCapacity must be positive");
         }
         this.executorQueueCapacity = executorQueueCapacity;
+    }
+
+    public RabbitRpcExecutorMode getExecutorMode() {
+        return executorMode;
+    }
+
+    public void setExecutorMode(RabbitRpcExecutorMode executorMode) {
+        if (executorMode == null) {
+            throw new IllegalArgumentException("executorMode must not be null");
+        }
+        this.executorMode = executorMode;
+    }
+
+    public int getMaxConcurrency() {
+        return maxConcurrency;
+    }
+
+    public void setMaxConcurrency(int maxConcurrency) {
+        if (maxConcurrency <= 0) {
+            throw new IllegalArgumentException("maxConcurrency must be positive");
+        }
+        this.maxConcurrency = maxConcurrency;
+    }
+
+    public RpcResponseMode getResponseMode() {
+        return responseMode;
+    }
+
+    public void setResponseMode(RpcResponseMode responseMode) {
+        if (responseMode == null) {
+            throw new IllegalArgumentException("responseMode must not be null");
+        }
+        this.responseMode = responseMode;
     }
 }
