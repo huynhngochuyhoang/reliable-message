@@ -44,15 +44,15 @@ public interface RabbitRpcBridgeExecutorProvider extends AutoCloseable {
                         }
                         future.whenComplete((value, error) -> {
                             if (error != null) {
-                                sink.error(error);
+                                sink.error(unwrapCompletionException(error));
                             } else {
                                 sink.success(value);
                             }
                         });
                     } catch (Exception error) {
-                        sink.error(error);
+                        sink.error(unwrapCompletionException(error));
                     } catch (Error error) {
-                        sink.error(error);
+                        sink.error(unwrapCompletionException(error));
                         throw error;
                     }
                 });
@@ -64,6 +64,13 @@ public interface RabbitRpcBridgeExecutorProvider extends AutoCloseable {
                 sink.error(new RabbitRpcBridgeRejectedException("Rabbit RPC bridge executor rejected request", error));
             }
         });
+    }
+
+    private static Throwable unwrapCompletionException(Throwable error) {
+        if (error instanceof java.util.concurrent.CompletionException && error.getCause() != null) {
+            return error.getCause();
+        }
+        return error;
     }
 
     static RabbitRpcBridgeExecutorProvider create(RabbitRpcWebFluxBridgeProperties properties) {

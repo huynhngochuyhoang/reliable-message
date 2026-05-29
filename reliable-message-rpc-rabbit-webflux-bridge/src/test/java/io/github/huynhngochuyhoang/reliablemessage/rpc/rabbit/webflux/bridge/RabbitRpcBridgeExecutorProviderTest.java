@@ -8,6 +8,7 @@ import reactor.core.scheduler.Scheduler;
 import reactor.test.StepVerifier;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -57,6 +58,7 @@ class RabbitRpcBridgeExecutorProviderTest {
         CountDownLatch runningTaskStarted = new CountDownLatch(1);
         CountDownLatch releaseRunningTask = new CountDownLatch(1);
         AtomicInteger queuedCalls = new AtomicInteger();
+        AtomicBoolean queuedSkipped = new AtomicBoolean();
 
         try (RabbitRpcBridgeExecutorProvider provider = RabbitRpcBridgeExecutorProvider.create(properties)) {
             Disposable runningSubscription = provider.execute(() -> {
@@ -69,7 +71,7 @@ class RabbitRpcBridgeExecutorProviderTest {
             Disposable queuedSubscription = provider.execute(() -> {
                 queuedCalls.incrementAndGet();
                 return CompletableFuture.completedFuture("queued");
-            }).subscribe();
+            }).doFinally(signal -> queuedSkipped.set(true)).subscribe();
             queuedSubscription.dispose();
 
             StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("saturated")))
@@ -78,6 +80,7 @@ class RabbitRpcBridgeExecutorProviderTest {
 
             releaseRunningTask.countDown();
             runningSubscription.dispose();
+            awaitTrue(queuedSkipped);
 
             StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("after-skip")))
                     .expectNext("after-skip")
@@ -188,6 +191,41 @@ class RabbitRpcBridgeExecutorProviderTest {
     }
 
     @Test
+    void futureCompletionExceptionIsUnwrapped() {
+        RabbitRpcWebFluxBridgeProperties properties = properties();
+        RuntimeException cause = new RuntimeException("conversion failed");
+        CompletableFuture<String> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new CompletionException(cause));
+
+        try (RabbitRpcBridgeExecutorProvider provider = RabbitRpcBridgeExecutorProvider.create(properties)) {
+            StepVerifier.create(provider.execute(() -> failed))
+                    .expectErrorMatches(error -> error == cause)
+                    .verify();
+        }
+    }
+
+    @Test
+    void defaultExecuteUnwrapsFutureCompletionException() {
+        RuntimeException cause = new RuntimeException("conversion failed");
+        CompletableFuture<String> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new CompletionException(cause));
+        RabbitRpcBridgeExecutorProvider provider = new RabbitRpcBridgeExecutorProvider() {
+            @Override
+            public Scheduler scheduler() {
+                return new ImmediateScheduler();
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+
+        StepVerifier.create(provider.execute(() -> failed))
+                .expectErrorMatches(error -> error == cause)
+                .verify();
+    }
+
+    @Test
     void cancellationAfterFutureReturnedCancelsFutureAndReleaseComesFromFutureTerminalCallback() throws Exception {
         RabbitRpcWebFluxBridgeProperties properties = properties();
         CountDownLatch futureReturned = new CountDownLatch(1);
@@ -238,6 +276,30 @@ class RabbitRpcBridgeExecutorProviderTest {
             StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("third")))
                     .expectNext("third")
                     .verifyComplete();
+        }
+    }
+
+    private static void awaitTrue(AtomicBoolean value) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!value.get() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(value).isTrue();
+    }
+
+    private static final class ImmediateScheduler implements Scheduler {
+
+        @Override
+        public Disposable schedule(Runnable task) {
+            task.run();
+            return () -> {
+            };
+        }
+
+
+        @Override
+        public Worker createWorker() {
+            throw new UnsupportedOperationException("not used");
         }
     }
 

@@ -65,17 +65,17 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
                         future.whenComplete((value, error) -> {
                             release.run();
                             if (error != null) {
-                                sink.error(error);
+                                sink.error(unwrapCompletionException(error));
                             } else {
                                 sink.success(value);
                             }
                         });
                     } catch (Exception error) {
                         release.run();
-                        sink.error(error);
+                        sink.error(unwrapCompletionException(error));
                     } catch (Error error) {
                         release.run();
-                        sink.error(error);
+                        sink.error(unwrapCompletionException(error));
                         throw error;
                     }
                 });
@@ -118,6 +118,13 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
             release.run();
             throw error;
         }
+    }
+
+    private static Throwable unwrapCompletionException(Throwable error) {
+        if (error instanceof CompletionException && error.getCause() != null) {
+            return error.getCause();
+        }
+        return error;
     }
 
     private Runnable releaseOnce(AtomicBoolean released) {
