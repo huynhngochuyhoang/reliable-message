@@ -39,7 +39,9 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
 
             AtomicBoolean released = new AtomicBoolean();
             AtomicBoolean cancelled = new AtomicBoolean();
+            AtomicBoolean taskStarted = new AtomicBoolean();
             AtomicReference<CompletableFuture<T>> futureRef = new AtomicReference<>();
+            AtomicReference<Future<?>> workerRef = new AtomicReference<>();
             Runnable release = releaseOnce(released);
 
             sink.onCancel(() -> {
@@ -47,12 +49,19 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
                 CompletableFuture<T> future = futureRef.get();
                 if (future != null) {
                     future.cancel(true);
+                    return;
+                }
+                Future<?> worker = workerRef.get();
+                if (worker != null && !taskStarted.get() && worker.cancel(false)) {
+                    removeQueuedWorker(worker);
+                    release.run();
                 }
             });
 
             try {
-                executor.execute(() -> {
+                Future<?> worker = executor.submit(() -> {
                     try {
+                        taskStarted.set(true);
                         if (cancelled.get()) {
                             release.run();
                             return;
@@ -79,6 +88,11 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
                         throw error;
                     }
                 });
+                workerRef.set(worker);
+                if (cancelled.get() && !taskStarted.get() && worker.cancel(false)) {
+                    removeQueuedWorker(worker);
+                    release.run();
+                }
             } catch (RejectedExecutionException error) {
                 release.run();
                 sink.error(new RabbitRpcBridgeRejectedException("Rabbit RPC bridge executor rejected request", error));
@@ -125,6 +139,12 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
             return error.getCause();
         }
         return error;
+    }
+
+    private void removeQueuedWorker(Future<?> worker) {
+        if (executor instanceof ThreadPoolExecutor threadPoolExecutor && worker instanceof Runnable runnable) {
+            threadPoolExecutor.remove(runnable);
+        }
     }
 
     private Runnable releaseOnce(AtomicBoolean released) {

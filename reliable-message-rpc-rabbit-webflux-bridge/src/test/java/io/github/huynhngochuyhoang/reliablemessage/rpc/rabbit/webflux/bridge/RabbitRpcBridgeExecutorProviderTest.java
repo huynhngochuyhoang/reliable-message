@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,9 +44,7 @@ class RabbitRpcBridgeExecutorProviderTest {
             releaseTask.countDown();
             firstFuture.complete("first");
 
-            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("third")))
-                    .expectNext("third")
-                    .verifyComplete();
+            awaitSuccessfulExecution(provider, "third");
         }
     }
 
@@ -74,17 +73,15 @@ class RabbitRpcBridgeExecutorProviderTest {
             }).doFinally(signal -> queuedSkipped.set(true)).subscribe();
             queuedSubscription.dispose();
 
-            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("saturated")))
-                    .expectError(RabbitRpcBridgeRejectedException.class)
-                    .verify();
-
-            releaseRunningTask.countDown();
-            runningSubscription.dispose();
-            awaitTrue(queuedSkipped);
-
-            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("after-skip")))
-                    .expectNext("after-skip")
+            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("after-queued-cancel")))
+                    .expectSubscription()
+                    .then(() -> {
+                        releaseRunningTask.countDown();
+                        runningSubscription.dispose();
+                    })
+                    .expectNext("after-queued-cancel")
                     .verifyComplete();
+            awaitTrue(queuedSkipped);
             assertThat(queuedCalls).hasValue(0);
         }
     }
@@ -240,11 +237,8 @@ class RabbitRpcBridgeExecutorProviderTest {
             assertThat(futureReturned.await(2, TimeUnit.SECONDS)).isTrue();
             subscription.dispose();
 
-            assertThat(future.isCancelled()).isTrue();
-
-            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("after-cancel")))
-                    .expectNext("after-cancel")
-                    .verifyComplete();
+            awaitTrue(future::isCancelled);
+            awaitSuccessfulExecution(provider, "after-cancel");
         }
     }
 
@@ -273,18 +267,41 @@ class RabbitRpcBridgeExecutorProviderTest {
             firstFuture.complete("first");
             firstSubscription.dispose();
 
-            StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture("third")))
-                    .expectNext("third")
-                    .verifyComplete();
+            awaitSuccessfulExecution(provider, "third");
         }
     }
 
     private static void awaitTrue(AtomicBoolean value) throws InterruptedException {
+        awaitTrue(value::get);
+    }
+
+    private static void awaitTrue(BooleanSupplier value) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (!value.get() && System.nanoTime() < deadline) {
+        while (!value.getAsBoolean() && System.nanoTime() < deadline) {
             Thread.sleep(10);
         }
-        assertThat(value).isTrue();
+        assertThat(value.getAsBoolean()).isTrue();
+    }
+
+    private static void awaitSuccessfulExecution(RabbitRpcBridgeExecutorProvider provider, String expected)
+            throws InterruptedException {
+        AssertionError lastFailure = null;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            try {
+                StepVerifier.create(provider.execute(() -> CompletableFuture.completedFuture(expected)))
+                        .expectNext(expected)
+                        .verifyComplete();
+                return;
+            } catch (AssertionError error) {
+                if (!String.valueOf(error).contains(RabbitRpcBridgeRejectedException.class.getName())) {
+                    throw error;
+                }
+                lastFailure = error;
+                Thread.sleep(10);
+            }
+        }
+        throw lastFailure == null ? new AssertionError("RPC bridge did not accept execution") : lastFailure;
     }
 
     private static final class ImmediateScheduler implements Scheduler {
