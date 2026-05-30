@@ -49,7 +49,8 @@ class RabbitRpcWebFluxBridgeAutoConfigurationTest {
     void doesNotCreateReactiveRabbitRpcClientWithoutAsyncRabbitTemplate() {
         contextRunner.run(context -> assertThat(context)
                 .hasSingleBean(RabbitRpcWebFluxBridgeProperties.class)
-                .doesNotHaveBean(ReactiveRabbitRpcClient.class));
+                .doesNotHaveBean(ReactiveRabbitRpcClient.class)
+                .doesNotHaveBean(RabbitRpcMetrics.class));
     }
 
     @Test

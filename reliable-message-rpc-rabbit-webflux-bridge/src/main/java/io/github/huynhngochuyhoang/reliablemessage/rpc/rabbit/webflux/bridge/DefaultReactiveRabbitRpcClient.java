@@ -1,23 +1,23 @@
 package io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge;
 
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcContext;
+import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcExceptionClassifier;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcTimeoutPolicy;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.webflux.ReactiveRpcContext;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.amqp.core.AsyncAmqpTemplate;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
+import org.springframework.amqp.support.converter.MessageConversionException;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.ResolvableType;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
@@ -25,6 +25,8 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
     private final AsyncAmqpTemplate asyncRabbitTemplate;
     private final RabbitRpcWebFluxBridgeProperties properties;
     private final RabbitRpcBridgeExecutorProvider executorProvider;
+    private final RabbitRpcMetrics metrics;
+    private final RpcExceptionClassifier exceptionClassifier = RpcExceptionClassifier.defaults();
 
     public DefaultReactiveRabbitRpcClient(
             AsyncRabbitTemplate asyncRabbitTemplate,
@@ -39,9 +41,21 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
             RabbitRpcWebFluxBridgeProperties properties,
             RabbitRpcBridgeExecutorProvider executorProvider
     ) {
+        this(asyncRabbitTemplate, properties, executorProvider, RabbitRpcMetrics.noop(
+                properties == null ? null : properties.getExecutorMode()
+        ));
+    }
+
+    public DefaultReactiveRabbitRpcClient(
+            AsyncAmqpTemplate asyncRabbitTemplate,
+            RabbitRpcWebFluxBridgeProperties properties,
+            RabbitRpcBridgeExecutorProvider executorProvider,
+            RabbitRpcMetrics metrics
+    ) {
         this.asyncRabbitTemplate = Objects.requireNonNull(asyncRabbitTemplate, "asyncRabbitTemplate must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.executorProvider = Objects.requireNonNull(executorProvider, "executorProvider must not be null");
+        this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
     }
 
     DefaultReactiveRabbitRpcClient(
@@ -50,6 +64,15 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
             Scheduler rpcScheduler
     ) {
         this(asyncRabbitTemplate, properties, new SchedulerBackedRabbitRpcBridgeExecutorProvider(rpcScheduler));
+    }
+
+    DefaultReactiveRabbitRpcClient(
+            AsyncAmqpTemplate asyncRabbitTemplate,
+            RabbitRpcWebFluxBridgeProperties properties,
+            Scheduler rpcScheduler,
+            RabbitRpcMetrics metrics
+    ) {
+        this(asyncRabbitTemplate, properties, new SchedulerBackedRabbitRpcBridgeExecutorProvider(rpcScheduler), metrics);
     }
 
     @Override
@@ -80,20 +103,99 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
         RpcTimeoutPolicy timeoutPolicy = new RpcTimeoutPolicy(timeout);
 
         return Mono.deferContextual(contextView -> {
+            Timer.Sample sample = metricsSample();
+            recordMetrics(() -> metrics.request(route));
             RpcContext rpcContext = ReactiveRpcContext.current(contextView).orElse(RpcContext.empty());
             Map<String, String> headers = headers(rpcContext);
             String correlationId = correlationId(headers);
             headers.putIfAbsent(RpcHeaders.CORRELATION_ID, correlationId);
             MessagePostProcessor postProcessor = message -> withRpcHeaders(message, correlationId, headers);
 
-            Mono<T> result = switch (effectiveOptions.responseMode()) {
+            Mono<T> attempt = Mono.defer(() -> switch (effectiveOptions.responseMode()) {
                 case RAW -> rawRequest(route, request, responseType, postProcessor);
                 case ENVELOPE -> envelopeRequest(route, request, responseType, postProcessor);
-            };
+            }).timeout(timeoutPolicy.requestTimeout());
 
-            // Reactor timeout cancels the local future, but RabbitMQ may still process a request already accepted by the broker.
-            return result.timeout(timeoutPolicy.requestTimeout());
+            return retry(route, attempt, 1)
+                    .doOnSuccess(value -> {
+                        recordMetrics(() -> metrics.success(route));
+                        recordMetrics(() -> metrics.duration(sample, route, "success"));
+                    })
+                    .doOnError(error -> {
+                        String status = status(error);
+                        recordMetrics(() -> metrics.failure(route, status));
+                        if (exceptionClassifier.timeout(error)) {
+                            recordMetrics(() -> metrics.timeout(route));
+                        }
+                        if (error instanceof RabbitRpcBridgeRejectedException) {
+                            recordMetrics(() -> metrics.bulkheadRejected(route));
+                        }
+                        recordMetrics(() -> metrics.duration(sample, route, status));
+                    });
         });
+    }
+
+    private <T> Mono<T> retry(String route, Mono<T> source, int attempt) {
+        return source.onErrorResume(error -> {
+            if (attempt >= properties.getMaxAttempts() || !retryable(error)) {
+                return Mono.error(error);
+            }
+            recordMetrics(() -> metrics.retry(route));
+            Duration backoff = retryBackoff(attempt);
+            Mono<Void> delay = backoff.isZero() ? Mono.empty() : Mono.delay(backoff).then();
+            return delay.then(retry(route, source, attempt + 1));
+        });
+    }
+
+    private boolean retryable(Throwable error) {
+        return !conversionFailure(error) && exceptionClassifier.retryable(error);
+    }
+
+    private static boolean conversionFailure(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof MessageConversionException) {
+                return true;
+            }
+            Throwable cause = current.getCause();
+            current = cause == current ? null : cause;
+        }
+        return false;
+    }
+
+    private Timer.Sample metricsSample() {
+        try {
+            return metrics.start();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static void recordMetrics(Runnable recorder) {
+        try {
+            recorder.run();
+        } catch (RuntimeException ignored) {
+            // Metrics must never alter RPC request/response behavior.
+        }
+    }
+
+    private Duration retryBackoff(int attempt) {
+        List<Duration> backoff = properties.getRetryBackoff();
+        int index = Math.min(attempt - 1, backoff.size() - 1);
+        return backoff.get(index);
+    }
+
+    private String status(Throwable error) {
+        if (error instanceof RabbitRpcBridgeRejectedException) {
+            return "bulkhead_rejected";
+        }
+        if (exceptionClassifier.timeout(error)) {
+            return "timeout";
+        }
+        if (error instanceof RabbitRpcRemoteException) {
+            return "remote_error";
+        }
+        return "failure";
     }
 
     private <T> Mono<T> rawRequest(
@@ -141,7 +243,7 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
         return future;
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private <T> ParameterizedTypeReference<RpcResponseEnvelope<T>> envelopeType(ParameterizedTypeReference<T> responseType) {
         ResolvableType payloadType = ResolvableType.forType(responseType.getType());
         ResolvableType envelopeType = ResolvableType.forClassWithGenerics(RpcResponseEnvelope.class, payloadType);

@@ -7,6 +7,7 @@ import reactor.core.scheduler.Schedulers;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridgeExecutorProvider {
@@ -39,9 +40,9 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
 
             AtomicBoolean released = new AtomicBoolean();
             AtomicBoolean cancelled = new AtomicBoolean();
-            AtomicBoolean taskStarted = new AtomicBoolean();
+            AtomicInteger state = new AtomicInteger(0);
             AtomicReference<CompletableFuture<T>> futureRef = new AtomicReference<>();
-            AtomicReference<Future<?>> workerRef = new AtomicReference<>();
+            AtomicReference<FutureTask<?>> workerRef = new AtomicReference<>();
             Runnable release = releaseOnce(released);
 
             sink.onCancel(() -> {
@@ -51,45 +52,60 @@ abstract class AbstractRabbitRpcBridgeExecutorProvider implements RabbitRpcBridg
                     future.cancel(true);
                     return;
                 }
-                Future<?> worker = workerRef.get();
-                if (worker != null && !taskStarted.get() && worker.cancel(false)) {
-                    removeQueuedWorker(worker);
+                if (state.compareAndSet(0, 2)) {
+                    FutureTask<?> worker = workerRef.get();
+                    if (worker != null) {
+                        worker.cancel(false);
+                        removeQueuedWorker(worker);
+                    }
                     release.run();
                 }
             });
 
-            try {
-                Future<?> worker = executor.submit(() -> {
-                    try {
-                        taskStarted.set(true);
-                        if (cancelled.get()) {
-                            release.run();
-                            return;
-                        }
-                        CompletableFuture<T> future = task.call();
-                        futureRef.set(future);
-                        if (cancelled.get()) {
-                            future.cancel(true);
-                        }
-                        future.whenComplete((value, error) -> {
-                            release.run();
-                            if (error != null) {
-                                sink.error(unwrapCompletionException(error));
-                            } else {
-                                sink.success(value);
-                            }
-                        });
-                    } catch (Exception error) {
+            FutureTask<Void> worker = new FutureTask<>(() -> {
+                try {
+                    if (!state.compareAndSet(0, 1)) {
                         release.run();
-                        sink.error(unwrapCompletionException(error));
-                    } catch (Error error) {
-                        release.run();
-                        sink.error(unwrapCompletionException(error));
-                        throw error;
+                        return null;
                     }
-                });
-                workerRef.set(worker);
-                if (cancelled.get() && !taskStarted.get() && worker.cancel(false)) {
+                    if (cancelled.get()) {
+                        release.run();
+                        return null;
+                    }
+                    CompletableFuture<T> future = task.call();
+                    futureRef.set(future);
+                    if (cancelled.get()) {
+                        future.cancel(true);
+                    }
+                    future.whenComplete((value, error) -> {
+                        release.run();
+                        if (error != null) {
+                            sink.error(unwrapCompletionException(error));
+                        } else {
+                            sink.success(value);
+                        }
+                    });
+                } catch (Exception error) {
+                    release.run();
+                    sink.error(unwrapCompletionException(error));
+                } catch (Error error) {
+                    release.run();
+                    sink.error(unwrapCompletionException(error));
+                    throw error;
+                }
+                return null;
+            });
+            workerRef.set(worker);
+
+            try {
+                if (cancelled.get() && state.compareAndSet(0, 2)) {
+                    worker.cancel(false);
+                    release.run();
+                    return;
+                }
+                executor.execute(worker);
+                if (cancelled.get() && state.compareAndSet(0, 2)) {
+                    worker.cancel(false);
                     removeQueuedWorker(worker);
                     release.run();
                 }

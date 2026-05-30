@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -193,7 +194,7 @@ class DefaultReactiveRabbitRpcClientTest {
                 .expectErrorSatisfies(error -> assertThat(RpcExceptionClassifier.defaults().timeout(error)).isTrue())
                 .verify();
 
-        assertThat(template.nextFuture.isCancelled()).isTrue();
+        awaitCondition(template.nextFuture::isCancelled, "RPC future cancellation");
     }
 
     @Test
@@ -207,7 +208,7 @@ class DefaultReactiveRabbitRpcClientTest {
             assertThat(template.awaitInvocation()).isTrue();
             subscription.dispose();
 
-            assertThat(template.nextFuture.isCancelled()).isTrue();
+            awaitCondition(template.nextFuture::isCancelled, "RPC future cancellation");
         } finally {
             scheduler.dispose();
         }
@@ -255,13 +256,15 @@ class DefaultReactiveRabbitRpcClientTest {
 
             RecordingAsyncAmqpTemplate timeoutTemplate = new RecordingAsyncAmqpTemplate();
             RabbitRpcWebFluxBridgeProperties timeoutProperties = new RabbitRpcWebFluxBridgeProperties();
-            timeoutProperties.setDefaultTimeout(Duration.ofMillis(10));
+            timeoutProperties.setDefaultTimeout(Duration.ofMillis(50));
             timeoutProperties.setMaxConcurrency(1);
-            StepVerifier.withVirtualTime(() -> new DefaultReactiveRabbitRpcClient(timeoutTemplate, timeoutProperties, provider)
+            StepVerifier.create(new DefaultReactiveRabbitRpcClient(timeoutTemplate, timeoutProperties, provider)
                             .request("orders.lookup", "request", String.class))
-                    .thenAwait(Duration.ofMillis(10))
+                    .then(() -> assertThat(timeoutTemplate.awaitInvocation()).isTrue())
                     .expectErrorSatisfies(error -> assertThat(RpcExceptionClassifier.defaults().timeout(error)).isTrue())
                     .verify();
+
+            awaitCondition(timeoutTemplate.nextFuture::isCancelled, "RPC future cancellation after timeout");
 
             RecordingAsyncAmqpTemplate cancellationTemplate = new RecordingAsyncAmqpTemplate();
             Disposable subscription = new DefaultReactiveRabbitRpcClient(cancellationTemplate, properties, provider)
@@ -269,6 +272,8 @@ class DefaultReactiveRabbitRpcClientTest {
                     .subscribe();
             assertThat(cancellationTemplate.awaitInvocation()).isTrue();
             subscription.dispose();
+
+            awaitCondition(cancellationTemplate.nextFuture::isCancelled, "RPC future cancellation");
 
             RecordingAsyncAmqpTemplate afterCancellationTemplate = new RecordingAsyncAmqpTemplate();
             afterCancellationTemplate.nextFuture.complete("after-cancel");
@@ -418,6 +423,22 @@ class DefaultReactiveRabbitRpcClientTest {
         assertThatThrownBy(() -> properties.setMaxConcurrency(0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("maxConcurrency must be positive");
+    }
+
+    private static void awaitCondition(BooleanSupplier condition, String description) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        assertThat(condition.getAsBoolean()).as(description).isTrue();
     }
 
     private static DefaultReactiveRabbitRpcClient client(

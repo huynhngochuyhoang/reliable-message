@@ -1,10 +1,9 @@
 package io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.autoconfigure;
 
-import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.DefaultReactiveRabbitRpcClient;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.RabbitRpcBridgeExecutorProvider;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.RabbitRpcWebFluxBridgeProperties;
-import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.ReactiveRabbitRpcClient;
+import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.*;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -34,11 +33,25 @@ public class RabbitRpcWebFluxBridgeAutoConfiguration {
     @Bean
     @ConditionalOnBean(AsyncRabbitTemplate.class)
     @ConditionalOnMissingBean
+    RabbitRpcMetrics rabbitRpcMetrics(
+            RabbitRpcWebFluxBridgeProperties properties,
+            ObjectProvider<MeterRegistry> meterRegistryProvider
+    ) {
+        MeterRegistry meterRegistry = meterRegistryProvider.getIfUnique();
+        return meterRegistry == null
+                ? RabbitRpcMetrics.noop(properties.getExecutorMode())
+                : new RabbitRpcMetrics(meterRegistry, properties.getExecutorMode());
+    }
+
+    @Bean
+    @ConditionalOnBean(AsyncRabbitTemplate.class)
+    @ConditionalOnMissingBean
     ReactiveRabbitRpcClient reactiveRabbitRpcClient(
             AsyncRabbitTemplate asyncRabbitTemplate,
             RabbitRpcWebFluxBridgeProperties properties,
-            RabbitRpcBridgeExecutorProvider executorProvider
+            RabbitRpcBridgeExecutorProvider executorProvider,
+            RabbitRpcMetrics metrics
     ) {
-        return new DefaultReactiveRabbitRpcClient(asyncRabbitTemplate, properties, executorProvider);
+        return new DefaultReactiveRabbitRpcClient(asyncRabbitTemplate, properties, executorProvider, metrics);
     }
 }
