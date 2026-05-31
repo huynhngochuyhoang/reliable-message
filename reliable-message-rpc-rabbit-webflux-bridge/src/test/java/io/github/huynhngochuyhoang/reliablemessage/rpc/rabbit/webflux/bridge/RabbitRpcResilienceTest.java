@@ -181,7 +181,7 @@ class RabbitRpcResilienceTest {
     }
 
     @Test
-    void headersAndCorrelationIdArePreservedAcrossRetries() throws Exception {
+    void headersArePreservedAndAmqpCorrelationIdIsRegeneratedAcrossRetries() throws Exception {
         RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
         CompletableFuture<Object> failed = new CompletableFuture<>();
         failed.completeExceptionally(new IOException("connection reset"));
@@ -201,9 +201,15 @@ class RabbitRpcResilienceTest {
                 .verifyComplete();
 
         assertThat(template.postProcessors).hasSize(2);
-        for (MessagePostProcessor postProcessor : template.postProcessors) {
-            Message processed = postProcessor.postProcessMessage(new Message(new byte[0], new MessageProperties()));
-            assertThat(processed.getMessageProperties().getCorrelationId()).isEqualTo("correlation-1");
+        List<Message> processedMessages = template.postProcessors.stream()
+                .map(postProcessor -> postProcessor.postProcessMessage(new Message(new byte[0], new MessageProperties())))
+                .toList();
+        assertThat(processedMessages)
+                .extracting(message -> message.getMessageProperties().getCorrelationId())
+                .doesNotHaveDuplicates();
+        for (Message processed : processedMessages) {
+            assertThat((Object) processed.getMessageProperties().getHeader(RpcHeaders.CORRELATION_ID))
+                    .isEqualTo("correlation-1");
             assertThat((Object) processed.getMessageProperties().getHeader(RpcHeaders.REQUEST_ID)).isEqualTo("request-1");
         }
     }

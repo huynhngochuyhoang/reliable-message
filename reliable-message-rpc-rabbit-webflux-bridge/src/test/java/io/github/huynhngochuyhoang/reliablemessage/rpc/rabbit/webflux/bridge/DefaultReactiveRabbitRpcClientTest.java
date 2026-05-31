@@ -356,7 +356,8 @@ class DefaultReactiveRabbitRpcClientTest {
                 .verifyComplete();
 
         Message processed = template.postProcessor.postProcessMessage(new Message(new byte[0], new MessageProperties()));
-        assertThat(processed.getMessageProperties().getCorrelationId()).isEqualTo("correlation-1");
+        assertThat(processed.getMessageProperties().getCorrelationId()).isNotBlank();
+        assertThat(processed.getMessageProperties().getCorrelationId()).isNotEqualTo("correlation-1");
         assertThat((Object) processed.getMessageProperties().getHeader(RpcHeaders.CORRELATION_ID)).isEqualTo("correlation-1");
         assertThat((Object) processed.getMessageProperties().getHeader(RpcHeaders.REQUEST_ID)).isEqualTo("request-1");
         assertThat((Object) processed.getMessageProperties().getHeader(RpcHeaders.TRACE_ID)).isEqualTo("trace-1");
@@ -375,9 +376,11 @@ class DefaultReactiveRabbitRpcClientTest {
                 .verifyComplete();
 
         Message processed = template.postProcessor.postProcessMessage(new Message(new byte[0], new MessageProperties()));
-        String correlationId = processed.getMessageProperties().getCorrelationId();
-        assertThat(correlationId).isNotBlank();
-        assertThat((Object) processed.getMessageProperties().getHeader(RpcHeaders.CORRELATION_ID)).isEqualTo(correlationId);
+        String amqpCorrelationId = processed.getMessageProperties().getCorrelationId();
+        String logicalCorrelationId = processed.getMessageProperties().getHeader(RpcHeaders.CORRELATION_ID);
+        assertThat(amqpCorrelationId).isNotBlank();
+        assertThat(logicalCorrelationId).isNotBlank();
+        assertThat(amqpCorrelationId).isNotEqualTo(logicalCorrelationId);
     }
 
     @Test

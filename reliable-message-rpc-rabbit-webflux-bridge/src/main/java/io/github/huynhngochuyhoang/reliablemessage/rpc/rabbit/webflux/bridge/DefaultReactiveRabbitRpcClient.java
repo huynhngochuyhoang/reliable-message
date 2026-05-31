@@ -107,13 +107,16 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
             recordMetrics(() -> metrics.request(route));
             RpcContext rpcContext = ReactiveRpcContext.current(contextView).orElse(RpcContext.empty());
             Map<String, String> headers = headers(rpcContext);
-            String correlationId = correlationId(headers);
-            headers.putIfAbsent(RpcHeaders.CORRELATION_ID, correlationId);
-            MessagePostProcessor postProcessor = message -> withRpcHeaders(message, correlationId, headers);
+            String logicalCorrelationId = correlationId(headers);
+            headers.putIfAbsent(RpcHeaders.CORRELATION_ID, logicalCorrelationId);
 
-            Mono<T> attempt = Mono.defer(() -> switch (effectiveOptions.responseMode()) {
-                case RAW -> rawRequest(route, request, responseType, postProcessor);
-                case ENVELOPE -> envelopeRequest(route, request, responseType, postProcessor);
+            Mono<T> attempt = Mono.defer(() -> {
+                String amqpCorrelationId = UUID.randomUUID().toString();
+                MessagePostProcessor postProcessor = message -> withRpcHeaders(message, amqpCorrelationId, headers);
+                return switch (effectiveOptions.responseMode()) {
+                    case RAW -> rawRequest(route, request, responseType, postProcessor);
+                    case ENVELOPE -> envelopeRequest(route, request, responseType, postProcessor);
+                };
             }).timeout(timeoutPolicy.requestTimeout());
 
             return retry(route, attempt, 1)
