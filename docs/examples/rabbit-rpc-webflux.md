@@ -30,13 +30,28 @@ The RPC bridge auto-configuration requires an `AsyncRabbitTemplate` bean. Add Sp
 class RabbitRpcConfiguration {
 
     @Bean
-    AsyncRabbitTemplate asyncRabbitTemplate(RabbitTemplate rabbitTemplate) {
+    Jackson2JsonMessageConverter rabbitRpcMessageConverter(ObjectMapper objectMapper) {
+        return new Jackson2JsonMessageConverter(objectMapper);
+    }
+
+    @Bean
+    AsyncRabbitTemplate asyncRabbitTemplate(
+            RabbitTemplate rabbitTemplate,
+            Jackson2JsonMessageConverter rabbitRpcMessageConverter
+    ) {
+        rabbitTemplate.setMessageConverter(rabbitRpcMessageConverter);
         return new AsyncRabbitTemplate(rabbitTemplate);
     }
 }
 ```
 
-Spring Boot configures the `RabbitTemplate` and Rabbit connection infrastructure from `spring.rabbitmq.*`. The RPC bridge consumes the `AsyncRabbitTemplate`; it does not create one.
+Spring Boot configures the `RabbitTemplate` and Rabbit connection infrastructure from `spring.rabbitmq.*`. The RPC bridge consumes the `AsyncRabbitTemplate`; it does not create one. The `convertSendAndReceiveAsType(...)` API requires a `SmartMessageConverter`, so the DTO, generic response, and envelope examples use `Jackson2JsonMessageConverter` explicitly.
+
+## Required RPC Topology
+
+The RPC bridge does not declare exchanges or responder queues. Provision the configured RPC exchange, responder queue, and routing-key binding through your broker platform or application topology configuration before sending requests.
+
+For the configuration below, declare a direct exchange named `app.rpc` and bind each responder queue to its route, such as `orders.lookup` or `orders.search`.
 
 ## Platform Executor Configuration
 

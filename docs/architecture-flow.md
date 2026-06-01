@@ -119,7 +119,7 @@ Rules:
 - Do not use JDBC or blocking Redis inside reactive pipelines.
 - Keep concurrency and prefetch bounded.
 
-R2DBC outbox schema DDL is configurable under `message.reliability.outbox.schema`. Column type resolution uses explicit user config first, dialect defaults second, and generic fallback last. PostgreSQL `json/jsonb` uses dialect-aware binding. `payload-storage=binary` is planned and currently fails fast until binary payload codec and `payload_bytes` read/write support are implemented. Claiming uses a generic conditional-update fallback and a PostgreSQL atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` strategy without window functions in the locked query.
+R2DBC outbox schema DDL is configurable under `message.reliability.outbox.schema`. Column type resolution uses explicit user config first, dialect defaults second, and generic fallback last. PostgreSQL `json/jsonb` uses dialect-aware binding. `payload-storage=binary` is planned and currently fails fast until binary payload codec and `payload_bytes` read/write support are implemented. Auto-configuration does not create the `message_outbox` table; provision it with a migration before enabling flushing. Claiming uses a non-PostgreSQL select-ID plus conditional-update fallback with `LIMIT` pagination and a PostgreSQL atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` strategy without window functions in the locked query. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
 
 ## Rabbit WebFlux Blocking Bridge Publish Flow
 

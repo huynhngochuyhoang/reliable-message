@@ -70,6 +70,8 @@ spring:
     password: change-me
 ```
 
+Provision the `message_outbox` table with a database migration before enabling flushing. Auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. Tests and simple local environments may invoke that method explicitly during startup.
+
 ## Platform Executor Configuration
 
 ```yaml
@@ -153,7 +155,7 @@ message:
 
 `payload-storage: binary` is planned, not supported by the current runtime store. It fails fast until binary payload codec and `payload_bytes` read/write support are implemented. PostgreSQL JSON mode uses dialect-aware `json/jsonb` binding.
 
-Claim strategy is dialect-aware: generic databases use conditional update claiming; PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` without a window function. MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet.
+Claim strategy is dialect-aware: the non-PostgreSQL fallback uses select-ID plus conditional-update claiming with `LIMIT` pagination and is only suitable for databases that support that syntax. PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` without a window function. MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
 
 ## Publish An Event
 

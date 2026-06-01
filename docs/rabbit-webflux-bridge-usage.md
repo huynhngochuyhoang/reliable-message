@@ -339,6 +339,8 @@ spring:
     password: change-me
 ```
 
+Provision the `message_outbox` table before enabling flushing. Auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. Production services should apply a database migration. Tests and simple local environments may invoke `initializeSchema()` explicitly during startup.
+
 ```yaml
 message:
   reliability:
@@ -359,9 +361,9 @@ Schema type resolution is: user explicit config, then dialect recommendation, th
 
 Claim strategy is dialect-aware:
 
-- Generic databases use conditional update claiming.
+- The non-PostgreSQL fallback uses select-ID plus conditional-update claiming with `LIMIT` pagination. Use it only with databases that support that syntax.
 - PostgreSQL uses an atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` strategy without window functions.
-- MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet.
+- MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
 
 ## Topology Declaration
 

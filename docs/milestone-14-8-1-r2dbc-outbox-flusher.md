@@ -60,6 +60,8 @@ Rabbit WebFlux blocking bridge also needs:
 
 ## Configuration
 
+Provision the `message_outbox` table before setting `message.reliability.outbox.enabled=true`. Auto-configuration does not invoke `R2dbcOutboxStore.initializeSchema()`. Production services should apply a database migration. Tests and simple local environments may invoke `initializeSchema()` explicitly during startup.
+
 ```yaml
 message:
   reliability:
@@ -183,7 +185,7 @@ It is not created for the RPC WebFlux module because RPC does not provide a `Rea
 
 Schema column types resolve in this order: explicit user configuration, dialect recommendation, then generic fallback. `text` and `json` payload storage are supported. `binary` is planned and fails fast until runtime codec and `payload_bytes` persistence support exist. PostgreSQL JSON uses dialect-aware `json/jsonb` binding.
 
-Claiming is dialect-aware. Generic databases use conditional update claiming. PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` with `UPDATE ... RETURNING` and no window function in the locked query. MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet.
+Claiming is dialect-aware. The non-PostgreSQL fallback uses select-ID plus conditional-update claiming with `LIMIT` pagination and is only suitable for databases that support that syntax. PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` with `UPDATE ... RETURNING` and no window function in the locked query. MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
 
 ## Out Of Scope
 

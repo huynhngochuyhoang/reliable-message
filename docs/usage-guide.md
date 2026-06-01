@@ -286,7 +286,7 @@ reliable-message-outbox-r2dbc
 reliable-message-idempotency-r2dbc or reliable-message-idempotency-redis-reactive
 ```
 
-R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. R2DBC outbox and R2DBC idempotency providers require a `ConnectionFactory`, typically from `spring-boot-starter-data-r2dbc`, a compatible driver, and `spring.r2dbc.*` configuration. Reactive Redis idempotency requires `spring-boot-starter-data-redis-reactive` or an application-provided `ReactiveStringRedisTemplate`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
+R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. Provision the `message_outbox` table with a database migration before enabling it; auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. R2DBC outbox and R2DBC idempotency providers require a `ConnectionFactory`, typically from `spring-boot-starter-data-r2dbc`, a compatible driver, and `spring.r2dbc.*` configuration. Reactive Redis idempotency requires `spring-boot-starter-data-redis-reactive` or an application-provided `ReactiveStringRedisTemplate`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
 
 Reactive flusher configuration:
 
@@ -380,9 +380,9 @@ Binary mode is not supported by the current runtime store. Configuring `payload-
 
 Claiming is dialect-aware:
 
-- Generic databases use select-ID plus conditional-update claiming.
+- The non-PostgreSQL fallback uses select-ID plus conditional-update claiming with `LIMIT` pagination. Use it only with databases that support that syntax.
 - PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` claiming without a window function in the locked query.
-- MySQL, Oracle and SQL Server optimized claim strategies are not implemented yet.
+- MySQL, Oracle and SQL Server optimized claim strategies are not implemented yet. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
 
 A worker only publishes rows it successfully claimed. Processing lease behavior remains available for reclaiming expired `PROCESSING` rows.
 
@@ -456,7 +456,7 @@ Rabbit RPC is request/response. It is separate from event messaging. Use the ded
 </dependency>
 ```
 
-The RPC bridge uses `AsyncRabbitTemplate` only. It does not use `RabbitTemplate`, event outbox, Rabbit event retry queues, or DLQ as its normal request/response flow. The application must provide an `AsyncRabbitTemplate` bean; the bridge auto-configuration does not create one. See the [Rabbit RPC WebFlux example](examples/rabbit-rpc-webflux.md) for the required bean setup.
+The RPC bridge uses `AsyncRabbitTemplate` only. It does not use `RabbitTemplate`, event outbox, Rabbit event retry queues, or DLQ as its normal request/response flow. The application must provide an `AsyncRabbitTemplate` bean configured with a `SmartMessageConverter`; the bridge auto-configuration does not create one. Provision the configured RPC exchange, responder queues, and route bindings separately. See the [Rabbit RPC WebFlux example](examples/rabbit-rpc-webflux.md) for the required bean and topology setup.
 
 ```text
 WebFlux caller

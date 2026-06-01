@@ -42,6 +42,8 @@ spring:
     password: change-me
 ```
 
+Provision the `message_outbox` table with a database migration before enabling flushing. Auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. Tests and simple local environments may invoke that method explicitly during startup.
+
 ## Configuration
 
 ```yaml

@@ -50,7 +50,7 @@ Schema initialization is exposed as a reactive operation:
 return r2dbcOutboxStore.initializeSchema();
 ```
 
-Production applications should normally manage the schema with migrations.
+Production applications should normally manage the schema with migrations. Outbox auto-configuration does not call `initializeSchema()`, so provision `message_outbox` before enabling the flusher.
 
 ## Reactive Transactions
 
