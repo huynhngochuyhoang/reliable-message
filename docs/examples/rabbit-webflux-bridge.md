@@ -20,6 +20,14 @@ Add R2DBC outbox when the WebFlux service must flush durable event rows through 
 
 ```xml
 <dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>r2dbc-postgresql</artifactId>
+</dependency>
+<dependency>
   <groupId>io.github.huynhngochuyhoang</groupId>
   <artifactId>reliable-message-outbox-r2dbc</artifactId>
   <version>0.1.0-SNAPSHOT</version>
@@ -27,6 +35,42 @@ Add R2DBC outbox when the WebFlux service must flush durable event rows through 
 ```
 
 Outbox remains event-messaging only. Do not use outbox for normal RPC.
+
+Add one reactive idempotency provider. This Redis example is auto-configured when Spring provides a reactive Redis template:
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+</dependency>
+<dependency>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-idempotency-redis-reactive</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+```
+
+The Redis provider requires a `ReactiveStringRedisTemplate`; Spring Boot creates it from the reactive Redis starter and connection configuration. The Rabbit bridge listener currently uses a 24-hour idempotency TTL internally. It does not expose a Rabbit-bridge TTL property yet. `reliable-message-idempotency-r2dbc` is the reactive database alternative and requires the same `ConnectionFactory` infrastructure as the R2DBC outbox.
+
+The R2DBC outbox requires a `ConnectionFactory`. Spring Boot creates it from `spring.r2dbc.*` when the R2DBC starter and compatible driver are present. The PostgreSQL dependency above is an example; use the driver for your database:
+
+```yaml
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/orders
+    username: orders
+    password: change-me
+```
+
+Provision the `message_outbox` table with a database migration before enabling flushing. Auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. Tests and simple local environments may invoke that method explicitly during startup.
 
 ## Platform Executor Configuration
 
@@ -69,7 +113,6 @@ message:
       bridge:
         enabled: true
         executor-mode: virtual-thread
-        queue-capacity: 1000
         max-concurrency: 1000
         rejection-policy: fail-fast
 ```
@@ -110,7 +153,9 @@ message:
         last-error-column-type: clob
 ```
 
-`payload-storage: binary` is planned, not supported by the current runtime store. It fails fast until binary payload codec and `payload_bytes` read/write support are implemented.
+`payload-storage: binary` is planned, not supported by the current runtime store. It fails fast until binary payload codec and `payload_bytes` read/write support are implemented. PostgreSQL JSON mode uses dialect-aware `json/jsonb` binding.
+
+Claim strategy is dialect-aware: the non-PostgreSQL fallback uses select-ID plus conditional-update claiming with `LIMIT` pagination and is only suitable for databases that support that syntax. PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` without a window function. MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
 
 ## Publish An Event
 
@@ -219,6 +264,8 @@ Spring AMQP listener thread
 
 Ack happens only after the handler `Mono` and idempotency `markSuccess` complete successfully. Strategy B async ack coordination is not implemented.
 
+Handler failures are nacked and pass through the minimal event failure hook. Retry and DLQ outcome metrics are emitted only when the configured hook returns a concrete outcome. Advanced retry/DLQ topology creation is not included in this bridge phase.
+
 ## Fail-Fast Rejection
 
 When bridge capacity is exhausted, publish fails with:
@@ -255,8 +302,8 @@ message_rabbit_bridge_consume_total
 message_rabbit_bridge_duplicate_total
 message_rabbit_bridge_failure_outcome_total
 message_rabbit_bridge_executor_rejected_total
-message_rabbit_bridge_executor_active
-message_rabbit_bridge_executor_queued
+message_rabbit_bridge_executor_active  # platform mode only
+message_rabbit_bridge_executor_queued  # platform mode only
 ```
 
 ## Do Not Do This

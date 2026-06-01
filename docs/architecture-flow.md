@@ -50,7 +50,7 @@ flowchart TB
 | Spring MVC + Kafka | MVC starter + Kafka MVC modules | Blocking app runtime with Kafka transport. |
 | Spring WebFlux + Kafka | WebFlux starter + Kafka WebFlux modules | Reactive messaging path. |
 | Spring WebFlux + RabbitMQ | `reliable-message-rabbit-webflux-bridge` | Blocking bridge, hybrid mode, migration support. |
-| Rabbit request/reply RPC | Rabbit RPC bridge direction | Uses `AsyncRabbitTemplate`, not event outbox. |
+| Rabbit request/reply RPC | `reliable-message-rpc-rabbit-webflux-bridge` | Uses `AsyncRabbitTemplate`, not event outbox. |
 | Audit logging | Audit extension modules | Opt-in compliance capture. |
 
 ## MVC Event Outbox Flow
@@ -119,7 +119,7 @@ Rules:
 - Do not use JDBC or blocking Redis inside reactive pipelines.
 - Keep concurrency and prefetch bounded.
 
-R2DBC outbox schema DDL is configurable under `message.reliability.outbox.schema`. Column type resolution uses explicit user config first, dialect defaults second, and generic fallback last. `payload-storage=binary` is planned and currently fails fast until binary payload codec and `payload_bytes` read/write support are implemented.
+R2DBC outbox schema DDL is configurable under `message.reliability.outbox.schema`. Column type resolution uses explicit user config first, dialect defaults second, and generic fallback last. PostgreSQL `json/jsonb` uses dialect-aware binding. `payload-storage=binary` is planned and currently fails fast until binary payload codec and `payload_bytes` read/write support are implemented. Auto-configuration does not create the `message_outbox` table; provision it with a migration before enabling flushing. Claiming uses a non-PostgreSQL select-ID plus conditional-update fallback with `LIMIT` pagination and a PostgreSQL atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` strategy without window functions in the locked query. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
 
 ## Rabbit WebFlux Blocking Bridge Publish Flow
 
@@ -176,21 +176,23 @@ Current listener mode is Strategy A only. No Strategy B async ack coordination:
 sequenceDiagram
     participant Caller as WebFlux caller
     participant Client as ReactiveRabbitRpcClient
+    participant Executor as RPC bridge executor
     participant AsyncRabbit as AsyncRabbitTemplate
     participant Future as CompletableFuture
-    participant Mono as Mono.fromFuture
-    participant Resilience as timeout/retry/circuit-breaker/bulkhead
+    participant Mono as Mono boundary
+    participant Resilience as timeout/retry/bounded bulkhead
     participant Result as response or error
 
     Caller->>Client: request(route, payload, options)
-    Client->>AsyncRabbit: request/reply
+    Client->>Executor: offload request creation
+    Executor->>AsyncRabbit: request/reply
     AsyncRabbit-->>Future: future response
     Client->>Mono: bridge future to Mono
     Mono->>Resilience: apply RPC resilience
     Resilience-->>Result: response or caller-visible error
 ```
 
-AsyncRabbitTemplate is RPC only. RPC does not use outbox by default. RPC uses request/response semantics.
+AsyncRabbitTemplate is RPC only. RPC does not use outbox by default. RPC uses request/response semantics. Timeout and cancellation are caller-visible, but may not cancel broker-side or remote work. The implemented RPC bridge supports raw replies, explicit response envelopes, generic response types, bounded retry, a bounded fail-fast bulkhead, platform or virtual-thread executor modes, and RPC-specific metrics. Rabbit RPC circuit-breaker integration is not implemented.
 
 ## Audit Extension Flow
 
@@ -215,5 +217,5 @@ Audit is opt-in. observability log != audit log. Observability logs are not audi
 - Rabbit WebFlux bridge is hybrid mode over blocking Spring AMQP.
 - Virtual threads reduce blocking cost, but they are not reactive and do not provide unlimited concurrency.
 - Blocking Rabbit work must not run on Netty event-loop threads.
-- Event retry/DLQ is separate from RPC timeout/retry/circuit-breaker behavior.
+- Event retry/DLQ is separate from RPC timeout, retry, and bulkhead behavior. Rabbit RPC circuit-breaker integration is not implemented.
 - Effectively-once depends on idempotency, outbox where configured, and correct ack/commit ordering.

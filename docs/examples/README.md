@@ -8,7 +8,7 @@ Copy and adapt these examples for the current Reliable Message modules.
 | [MVC Kafka](mvc-kafka.md) | Blocking Spring MVC service publishes and consumes Kafka events. |
 | [WebFlux Kafka](webflux-kafka.md) | Reactive WebFlux service uses Kafka with reactive handlers. |
 | [Rabbit WebFlux blocking bridge](rabbit-webflux-bridge.md) | WebFlux service must use RabbitMQ through Spring AMQP. |
-| [Rabbit RPC WebFlux](rabbit-rpc-webflux.md) | Planned Rabbit request/reply support; not implemented yet. |
+| [Rabbit RPC WebFlux](rabbit-rpc-webflux.md) | WebFlux-friendly Rabbit request/reply bridge using `AsyncRabbitTemplate`. |
 | [Audit extension](audit-extension.md) | Optional compliance audit capture for publish/consume boundaries. |
 
 Keep these boundaries clear:

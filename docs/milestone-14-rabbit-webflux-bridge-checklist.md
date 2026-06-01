@@ -10,33 +10,37 @@ This milestone adds RabbitMQ support for WebFlux systems as a blocking bridge, h
 - [x] Bridge execution is isolated behind explicit platform or virtual-thread executor modes.
 - [x] Overload behavior is bounded with fail-fast rejection.
 - [x] Bridge metrics use `runtime=webflux-bridge`, `transport=rabbit`, and `executor_mode` tags.
-- [x] Phase 14.9 and later keep Rabbit RPC in a separate `AsyncRabbitTemplate`-based module.
-- [ ] Phase 14.12 remains the user-facing README and usage documentation pass.
+- [x] Phase 14.8.1 adds reactive R2DBC outbox flushing for event publishers.
+- [x] Phase 14.8.2 adds dialect-aware outbox schema resolution and PostgreSQL JSON binding.
+- [x] Phase 14.8.3 adds generic and PostgreSQL optimized outbox claim strategies.
+- [x] Phase 14.9 through Phase 14.11 keep Rabbit RPC in a separate `AsyncRabbitTemplate`-based module.
+- [x] Phase 14.10.1 adds RPC response typing, envelope handling, and bounded virtual-thread mode.
+- [x] Phase 14.12 completes the user-facing README and usage documentation pass.
 
 ## Implemented Direction
 
 - [x] Keep the event bridge honest as blocking bridge, hybrid mode, and migration support.
 - [x] Treat virtual threads as optimized blocking support, not as reactive RabbitMQ.
 - [x] Keep `ReactiveReliablePublisher` separate from `ReactiveRabbitRpcClient`.
-- [x] Keep event retry/DLQ separate from RPC timeout/retry/circuit-breaker semantics.
+- [x] Keep event retry/DLQ separate from RPC timeout, retry, and bulkhead semantics.
 
 ## Global Guardrails
 
-- [ ] Keep event messaging and RPC in separate modules and APIs.
-- [ ] Use `RabbitTemplate` for event messaging only.
-- [ ] Use `AsyncRabbitTemplate` for RPC only.
-- [ ] Do not use outbox for RPC by default.
-- [ ] Do not add outbox integration to milestone 14 unless explicitly requested later.
-- [ ] Do not hide blocking RabbitMQ calls behind `Mono` without an explicit bridge executor.
-- [ ] Do not run blocking RabbitMQ work on Netty event-loop threads.
-- [ ] Use bounded executors, bounded queues, and bounded concurrency.
-- [ ] Implement only `fail-fast` rejection in the first version.
-- [ ] Do not implement `block-caller` rejection yet.
-- [ ] Do not implement `drop-and-metric` rejection yet.
-- [ ] Ack only after the handler `Mono` completes successfully.
-- [ ] Do not implement Strategy B async ack coordination yet.
-- [ ] Treat virtual threads only as a blocking bridge executor option.
-- [ ] Do not claim fully reactive, fully non-blocking, exactly-once, or unlimited concurrency semantics.
+- [x] Keep event messaging and RPC in separate modules and APIs.
+- [x] Use `RabbitTemplate` for event messaging only.
+- [x] Use `AsyncRabbitTemplate` for RPC only.
+- [x] Do not use outbox for RPC by default.
+- [x] Keep optional R2DBC outbox flushing event-messaging only.
+- [x] Do not hide blocking RabbitMQ calls behind `Mono` without an explicit bridge executor.
+- [x] Do not run blocking RabbitMQ work on Netty event-loop threads.
+- [x] Use bounded executors, bounded queues, and bounded concurrency.
+- [x] Implement only `fail-fast` rejection in the first version.
+- [x] Do not implement `block-caller` rejection yet.
+- [x] Do not implement `drop-and-metric` rejection yet.
+- [x] Ack only after the handler `Mono` completes successfully.
+- [x] Do not implement Strategy B async ack coordination yet.
+- [x] Treat virtual threads only as a blocking bridge executor option.
+- [x] Do not claim fully reactive, fully non-blocking, exactly-once, or unlimited concurrency semantics.
 
 ## Phase 14.1 Event Bridge Module Scaffold And Properties
 
@@ -233,7 +237,7 @@ Implementation tasks:
 - [x] Handle duplicate `PROCESSING` and `FAILED` without acking as success.
 - [x] Mark success only after handler `Mono` completes.
 - [x] Mark failure when handler or idempotency flow fails.
-- [x] Route event failures through Rabbit-native retry and DLQ semantics.
+- [x] Expose a Rabbit event failure hook and record retry/DLQ outcomes when the hook returns a concrete outcome.
 
 Tests to write first:
 - [x] New message runs `tryStart`, handler `Mono`, `markSuccess`, then ack.
@@ -242,7 +246,7 @@ Tests to write first:
 - [x] Duplicate `FAILED` does not ack as success.
 - [x] Handler failure marks failure and does not ack as success.
 - [x] Idempotency store failure does not silently ack.
-- [x] Retry exhaustion routes to DLQ using event messaging semantics.
+- [x] Failure-hook outcomes remain event-messaging-only and do not add Reactor retry or advanced topology creation.
 
 Success criteria:
 - [x] Duplicate behavior cannot silently lose messages.
@@ -331,6 +335,42 @@ Out of scope:
 - [x] RPC metrics.
 - [x] Mandatory distributed tracing dependency.
 
+## Phase 14.8.1 Reactive R2DBC Outbox Flusher Wiring
+
+Goal:
+- [x] Flush durable reactive event rows through the active `ReactiveReliablePublisher`.
+
+Implemented direction:
+- [x] Add `ReactiveOutboxFlushScheduler` and `R2dbcOutboxProperties`.
+- [x] Create the scheduler only when outbox and flushing are enabled and both store and publisher beans exist.
+- [x] Read claimed rows, publish through `ReactiveReliablePublisher`, mark published only after success, and mark failed with retry metadata on error.
+- [x] Skip overlapping flush ticks and keep per-batch work bounded.
+- [x] Keep RPC outbox disabled by default.
+
+## Phase 14.8.2 R2DBC Outbox Schema Configuration
+
+Goal:
+- [x] Keep R2DBC outbox DDL portable without drifting from runtime binding behavior.
+
+Implemented direction:
+- [x] Resolve column types from explicit config, dialect recommendation, then generic fallback.
+- [x] Support `text` and `json` payload storage modes.
+- [x] Use dialect-aware PostgreSQL `json/jsonb` binding.
+- [x] Fail fast for planned `binary` storage until runtime codec and `payload_bytes` read/write support exist.
+- [x] Provide PostgreSQL, MySQL, Oracle, SQL Server, and generic defaults.
+
+## Phase 14.8.3 R2DBC Outbox Claim Strategy
+
+Goal:
+- [x] Isolate dialect-aware outbox claiming while preserving portable fallback behavior.
+
+Implemented direction:
+- [x] Add `OutboxClaimStrategy`.
+- [x] Keep generic select-ID plus conditional-update claiming as fallback.
+- [x] Add PostgreSQL atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` claiming.
+- [x] Keep retry eligibility and processing lease behavior unchanged.
+- [x] Avoid window functions in the PostgreSQL locked query.
+
 ## Phase 14.9 Rabbit RPC WebFlux Bridge Module Scaffold
 
 Goal:
@@ -369,113 +409,72 @@ Out of scope:
 ## Phase 14.10 Rabbit RPC Request/Response Client
 
 Goal:
-- [ ] Implement Rabbit request/reply over `AsyncRabbitTemplate` with WebFlux-friendly `Mono` composition.
+- [x] Implement Rabbit request/reply over `AsyncRabbitTemplate` with a WebFlux-friendly `Mono` boundary.
 
-Implementation tasks:
-- [ ] Add `DefaultReactiveRabbitRpcClient`.
-- [ ] Use `AsyncRabbitTemplate` request/reply APIs.
-- [ ] Convert the returned future to `Mono`.
-- [ ] Apply timeout behavior.
-- [ ] Propagate correlation ID and RPC headers.
-- [ ] Surface remote failure, timeout, broker failure, and deserialization failure.
+Implemented direction:
+- [x] Add `DefaultReactiveRabbitRpcClient`.
+- [x] Offload `AsyncRabbitTemplate` invocation to the dedicated RPC bridge executor.
+- [x] Apply caller-visible timeout without blocking caller/event-loop threads.
+- [x] Propagate logical RPC headers and generate a fresh physical AMQP correlation ID per retry attempt.
+- [x] Surface transport/future and conversion failures.
+- [x] Keep cancellation honest: client-side cancellation may not cancel broker-side or remote work.
 
-Tests to write first:
-- [ ] Request sends through `AsyncRabbitTemplate`.
-- [ ] Successful future completes the returned `Mono`.
-- [ ] Timeout fails the returned `Mono`.
-- [ ] Remote failure propagates.
-- [ ] Reply deserialization failure propagates.
-- [ ] Correlation ID and headers are sent.
-- [ ] No outbox interaction occurs.
-- [ ] No `RabbitTemplate` usage exists.
-
-Success criteria:
-- [ ] RPC request/reply works without blocking the WebFlux caller.
-- [ ] Timeout is caller-visible.
-- [ ] RPC remains request/response, not event messaging.
-
-Risks:
-- [ ] Timeout cancellation may not cancel broker-side or remote work.
-- [ ] Request/reply retry can duplicate downstream side effects if used carelessly.
-
-Out of scope:
-- [ ] Event messaging.
-- [ ] Durable command workflow.
-- [ ] Circuit breaker.
-- [ ] Audit.
-
-## Phase 14.11 Rabbit RPC Retry, Circuit Breaker, Bulkhead, And Metrics
+## Phase 14.10.1 Rabbit RPC Client Hardening
 
 Goal:
-- [ ] Add normal RPC resilience features without event outbox or DLQ semantics.
+- [x] Add typed responses, application error envelopes, and bounded executor modes.
 
-Implementation tasks:
-- [ ] Reuse or adapt `ReactiveRpcOperator` if it fits.
-- [ ] Add retry for retryable RPC failures.
-- [ ] Add timeout metrics.
-- [ ] Add retry metrics.
-- [ ] Add circuit breaker integration if the existing RPC extension supports it.
-- [ ] Add bulkhead behavior without unbounded queueing.
-- [ ] Record request, success, failure, timeout, retry, and duration metrics.
+Implemented direction:
+- [x] Support `ParameterizedTypeReference<T>`.
+- [x] Keep raw response mode backward-compatible.
+- [x] Add explicit `RpcResponseEnvelope<T>` handling and map `ERROR` to `RabbitRpcRemoteException`.
+- [x] Support platform and named virtual-thread RPC executor modes.
+- [x] Keep both modes bounded by `max-concurrency` and fail fast on saturation.
+- [x] Hold permits for active bridge work until the returned future reaches a terminal state.
 
-Tests to write first:
-- [ ] Retry happens for retryable timeout or connection errors.
-- [ ] Non-retryable errors are not retried.
-- [ ] Circuit breaker open fails fast.
-- [ ] Bulkhead rejects without unbounded queueing.
-- [ ] Metrics count request success.
-- [ ] Metrics count failure.
-- [ ] Metrics count timeout.
-- [ ] Metrics count retry.
-- [ ] RPC still does not use outbox by default.
+## Phase 14.11 Rabbit RPC Retry, Bulkhead, And Metrics
 
-Success criteria:
-- [ ] RPC behavior matches request/response dependency semantics.
-- [ ] RPC does not use Rabbit event retry queues or DLQ as its primary flow.
-- [ ] RPC metrics are separate from event bridge metrics.
+Goal:
+- [x] Add normal RPC resilience without event outbox, retry queue, or DLQ semantics.
+
+Implemented direction:
+- [x] Retry Reactor timeout, native `AmqpReplyTimeoutException`, and failures rooted in `IOException` within configured attempt bounds.
+- [x] Do not retry remote `ERROR` envelopes or conversion failures by default.
+- [x] Reuse RPC executor `max-concurrency` as the fail-fast bounded bulkhead.
+- [x] Record RPC-specific request, success, failure, timeout, retry, bulkhead rejection, and duration metrics.
+- [x] Keep RPC metrics separate from event bridge metrics.
+- [ ] Rabbit RPC circuit-breaker integration is not implemented.
 
 Risks:
-- [ ] Retrying non-idempotent RPC calls creates duplicate side effects.
-- [ ] Circuit breaker integration expands the milestone too much.
-- [ ] Bulkhead queueing accidentally becomes unbounded.
-
-Out of scope:
-- [ ] Event messaging retry queues.
-- [ ] Durable async command workflow.
-- [ ] Outbox-backed RPC.
+- [x] Retrying non-idempotent RPC calls can duplicate downstream side effects and is documented explicitly.
+- [x] Timeout or cancellation may not stop broker-side or remote work and is documented explicitly.
 
 ## Phase 14.12 Documentation And Limitations
 
 Goal:
-- [ ] Document milestone 14 honestly after behavior exists.
+- [x] Document milestone 14 honestly after implementation.
 
 Implementation tasks:
-- [ ] Update README with blocking bridge, hybrid mode, and migration support wording.
-- [ ] Add Rabbit WebFlux bridge usage docs.
-- [ ] Document `RabbitTemplate` for event messaging only.
-- [ ] Document `AsyncRabbitTemplate` for RPC only.
-- [ ] Document that RPC does not use outbox by default.
-- [ ] Document fail-fast rejection as the only first-version rejection policy.
-- [ ] Document virtual threads as a blocking bridge executor option.
-- [ ] Document limitations and non-goals.
-
-Tests to write first:
-- [ ] Verify documentation examples match actual class and property names.
-- [ ] Verify docs do not mention full reactive RabbitMQ support.
-- [ ] Verify docs do not recommend `AsyncRabbitTemplate` for event publishing.
-- [ ] Verify docs do not recommend outbox for normal RPC.
+- [x] Update README and usage docs with blocking bridge, hybrid mode, and migration support wording.
+- [x] Document `RabbitTemplate` for event messaging only.
+- [x] Document `AsyncRabbitTemplate` for RPC only.
+- [x] Document that RPC does not use outbox by default.
+- [x] Document fail-fast rejection as the only first-version event-bridge overload policy.
+- [x] Document virtual threads as optimized blocking support, not reactive behavior.
+- [x] Document Strategy A listener semantics and Strategy B as unsupported.
+- [x] Document R2DBC flusher, schema resolution, PostgreSQL JSON binding, and PostgreSQL claim optimization.
+- [x] Document Rabbit RPC raw/envelope modes, generic response types, retry, bulkhead, metrics, and limitations.
+- [x] Document Rabbit RPC circuit breaker as not implemented.
 
 Success criteria:
-- [ ] Documentation uses blocking bridge, hybrid mode, and migration support wording.
-- [ ] Documentation does not overclaim full reactive or non-blocking RabbitMQ broker I/O behavior.
-- [ ] Documentation clearly separates event messaging from RPC.
-
-Risks:
-- [ ] Docs overclaim implementation guarantees.
-- [ ] Docs hide blocking limitations.
-- [ ] Docs blur event and RPC semantics.
+- [x] Documentation uses blocking bridge, hybrid mode, and migration support wording.
+- [x] Documentation does not overclaim fully reactive or non-blocking RabbitMQ broker I/O behavior.
+- [x] Documentation clearly separates event messaging from RPC.
+- [x] Documentation keeps event outbox separate from normal RPC.
 
 Out of scope:
-- [ ] New runtime features.
-- [ ] Strategy B async ack documentation as supported behavior.
-- [ ] Outbox integration docs for milestone 14.
+- [x] New runtime features.
+- [x] Strategy B async ack coordination.
+- [x] Binary outbox payload persistence.
+- [x] MySQL, Oracle, or SQL Server optimized claim strategies.
+- [x] Rabbit RPC circuit breaker.

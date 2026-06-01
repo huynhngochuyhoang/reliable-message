@@ -264,7 +264,7 @@ rpc_reactive_circuit_open_total
 
 ## 7. Rabbit RPC WebFlux Bridge
 
-Planned module:
+Implemented module:
 
 ```text
 reliable-message-rpc-rabbit-webflux-bridge
@@ -296,19 +296,22 @@ Conceptual flow:
 ```text
 WebFlux caller
  -> build RPC request
+ -> dedicated RPC bridge executor
  -> AsyncRabbitTemplate convertSendAndReceive
  -> CompletableFuture
- -> Mono.fromFuture
- -> timeout/retry/circuit-breaker/bulkhead
+ -> Mono boundary
+ -> timeout/bounded retry/fail-fast bulkhead
  -> response or caller-visible failure
 ```
 
-Example pattern:
+Implemented composition shape:
 
 ```java
-Mono.fromFuture(() -> asyncRabbitTemplate.convertSendAndReceiveAsType(...))
+executorProvider.execute(() -> asyncRabbitTemplate.convertSendAndReceiveAsType(...))
     .timeout(options.timeout());
 ```
+
+The bridge supports raw replies, explicit `RpcResponseEnvelope<T>` replies, `ParameterizedTypeReference<T>` response types, and platform or virtual-thread executor modes. Both executor modes remain bounded by `max-concurrency`.
 
 Important boundaries:
 
@@ -328,12 +331,13 @@ success response
 timeout
 remote failure
 reply deserialization failure
-circuit breaker open
 bulkhead rejection
 broker unavailable
 ```
 
 RPC retry is request/response retry. It is not Rabbit event retry queue behavior.
+
+Rabbit RPC circuit-breaker integration is not implemented.
 
 Retry risks:
 

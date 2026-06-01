@@ -16,13 +16,33 @@ Use this for a reactive WebFlux service that publishes and consumes Kafka events
   <version>0.1.0-SNAPSHOT</version>
 </dependency>
 <dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>r2dbc-postgresql</artifactId>
+</dependency>
+<dependency>
   <groupId>io.github.huynhngochuyhoang</groupId>
   <artifactId>reliable-message-outbox-r2dbc</artifactId>
   <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
-Add `reliable-message-idempotency-r2dbc` or `reliable-message-idempotency-redis-reactive` for reactive idempotency.
+Add `reliable-message-idempotency-r2dbc` or `reliable-message-idempotency-redis-reactive` for reactive idempotency. R2DBC idempotency requires the same `ConnectionFactory` infrastructure as the outbox. For Redis idempotency, also add `spring-boot-starter-data-redis-reactive` so Spring Boot creates the required `ReactiveStringRedisTemplate`.
+
+The R2DBC outbox requires a `ConnectionFactory`. Spring Boot creates it from `spring.r2dbc.*` when the R2DBC starter and compatible driver are present. The PostgreSQL dependency above is an example; use the driver for your database:
+
+```yaml
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/orders
+    username: orders
+    password: change-me
+```
+
+Provision the `message_outbox` table with a database migration before enabling flushing. Auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. Tests and simple local environments may invoke that method explicitly during startup.
 
 ## Configuration
 

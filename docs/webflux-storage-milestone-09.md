@@ -16,11 +16,21 @@ Add the R2DBC outbox module:
 
 ```xml
 <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>r2dbc-postgresql</artifactId>
+</dependency>
+<dependency>
     <groupId>io.github.huynhngochuyhoang</groupId>
     <artifactId>reliable-message-outbox-r2dbc</artifactId>
     <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
+
+The R2DBC outbox and R2DBC idempotency providers require a `ConnectionFactory`. Spring Boot creates it from `spring.r2dbc.*` when the R2DBC starter and compatible driver are present. Applications may provide a custom `ConnectionFactory` instead. The PostgreSQL dependency above is an example; use the driver for your database.
 
 `R2dbcOutboxStore` implements `ReactiveOutboxStore`:
 
@@ -40,7 +50,7 @@ Schema initialization is exposed as a reactive operation:
 return r2dbcOutboxStore.initializeSchema();
 ```
 
-Production applications should normally manage the schema with migrations.
+Production applications should normally manage the schema with migrations. Outbox auto-configuration does not call `initializeSchema()`, so provision `message_outbox` before enabling the flusher.
 
 ## Reactive Transactions
 
@@ -93,13 +103,17 @@ Add the Reactive Redis idempotency module:
 
 ```xml
 <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+</dependency>
+<dependency>
     <groupId>io.github.huynhngochuyhoang</groupId>
     <artifactId>reliable-message-idempotency-redis-reactive</artifactId>
     <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
-`ReactiveRedisIdempotencyStore` uses `ReactiveStringRedisTemplate`.
+`ReactiveRedisIdempotencyStore` uses `ReactiveStringRedisTemplate`. The provider auto-configuration requires that template bean; Spring Boot creates it when the reactive Redis starter and Redis connection configuration are present.
 It starts missing keys with `setIfAbsent`, returns duplicates for active processing/success states, and can restart failed keys.
 
 ## Completed Milestone

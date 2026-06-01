@@ -145,6 +145,32 @@ ReactiveReliablePublisher.publish
 
 `RabbitTemplate.convertAndSend` is blocking. It runs on the bridge executor, not inline on the caller thread.
 
+## Reactive Idempotency Provider
+
+Add one reactive idempotency provider. For Redis:
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+</dependency>
+<dependency>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-idempotency-redis-reactive</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+```
+
+The Redis provider auto-configuration requires a `ReactiveStringRedisTemplate`. Spring Boot creates it when the reactive Redis starter and Redis connection configuration are present. The bridge auto-wires the resulting `ReactiveIdempotencyStore`. The current Rabbit bridge listener uses a 24-hour idempotency TTL internally; there is no Rabbit-bridge TTL configuration property yet. Use `reliable-message-idempotency-r2dbc` instead when R2DBC-backed idempotency is required; it requires the same `ConnectionFactory` infrastructure as the R2DBC outbox.
+
 ## Consume Events
 
 Use `@ReactiveReliableListener` with `Mono<Void>`:
@@ -220,6 +246,8 @@ Ack rules:
 - New message: ack only after handler `Mono` completes and `markSuccess` succeeds.
 - Handler failure: mark failed where possible, then nack/failure hook.
 
+The bridge exposes a minimal event failure hook. Retry and DLQ outcome metrics are recorded only when a configured hook returns a concrete outcome. Advanced retry/DLQ topology creation is not part of this bridge phase.
+
 No Strategy B async ack coordination. Strategy B async ack coordination is not implemented.
 
 ## Fail-Fast Rejection
@@ -283,6 +311,60 @@ message_rabbit_bridge_executor_queued
 
 Virtual-thread mode does not emit active/queued executor gauges because it uses semaphore-bounded submission rather than a `ThreadPoolExecutor` queue. Retry and DLQ outcome metrics are recorded only when event failure hooks expose concrete outcomes.
 
+## Reactive R2DBC Outbox
+
+Add `reliable-message-outbox-r2dbc` when durable WebFlux event rows should be flushed through the active `ReactiveReliablePublisher`:
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>r2dbc-postgresql</artifactId>
+</dependency>
+<dependency>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-outbox-r2dbc</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/orders
+    username: orders
+    password: change-me
+```
+
+Provision the `message_outbox` table before enabling flushing. Auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. Production services should apply a database migration. Tests and simple local environments may invoke `initializeSchema()` explicitly during startup.
+
+```yaml
+message:
+  reliability:
+    outbox:
+      enabled: true
+      flush-enabled: true
+      batch-size: 100
+      flush-delay: 5s
+      retry-delay: 30s
+      publish-timeout: 30s
+      schema:
+        payload-storage: json
+```
+
+The outbox auto-configuration requires a `ConnectionFactory`. Spring Boot creates it from `spring.r2dbc.*` when the R2DBC starter and a compatible driver are present. The PostgreSQL dependency above is an example; use the driver for your database. The flusher reads claimed rows, publishes through `ReactiveReliablePublisher`, calls `markPublished` only after publish success, and calls `markFailed` when publish or post-publish persistence fails. It is event messaging only. RPC does not use outbox by default.
+
+Schema type resolution is: user explicit config, then dialect recommendation, then generic fallback. `text` and `json` storage modes are supported. `binary` is planned and fails fast until runtime codec and `payload_bytes` read/write support exist. PostgreSQL `json/jsonb` uses dialect-aware binding.
+
+Claim strategy is dialect-aware:
+
+- The non-PostgreSQL fallback uses select-ID plus conditional-update claiming with `LIMIT` pagination. Use it only with databases that support that syntax.
+- PostgreSQL uses an atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` strategy without window functions.
+- MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
+
 ## Topology Declaration
 
 The bridge can declare listener queues, exchange and bindings when topology auto-declaration is enabled. Disable auto-declare when broker topology is pre-provisioned or the service has read-only RabbitMQ permissions.
@@ -297,5 +379,5 @@ Keep these limits visible in service documentation:
 - Platform mode bounds work through queue capacity, concurrency guard and fail-fast rejection.
 - Virtual-thread mode bounds work through semaphore-based submission, concurrency guard and fail-fast rejection; `queue-capacity` does not affect virtual-thread overload behavior.
 - Listener Strategy A blocks at the bridge boundary until handler completion.
-- Outbox integration is not part of Milestone 14 event bridge unless added later.
+- Reactive R2DBC outbox flushing is optional event-messaging support. It does not replace direct publishing and does not apply to RPC.
 - Rabbit RPC belongs in a separate `AsyncRabbitTemplate`-based module.

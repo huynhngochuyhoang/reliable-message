@@ -44,14 +44,15 @@ event-loop safety warning/signal
 bridge observability
 ```
 
-Rabbit RPC is intentionally separate and planned for later phases:
+Rabbit RPC is intentionally separate and implemented in its dedicated module:
 
 ```text
 reliable-message-rpc-rabbit-webflux-bridge
 ReactiveRabbitRpcClient
 AsyncRabbitTemplate request/reply
-Mono.fromFuture
-RPC timeout/retry/circuit-breaker/bulkhead
+dedicated RPC bridge executor
+CompletableFuture to Mono boundary
+timeout/bounded retry/fail-fast bulkhead
 ```
 
 ## 1. Why This Exists
@@ -118,8 +119,9 @@ Use for:
 ReactiveRabbitRpcClient
 AsyncRabbitTemplate
 request/reply
-Mono.fromFuture
-timeout/retry/circuit-breaker/bulkhead
+dedicated RPC bridge executor
+CompletableFuture to Mono boundary
+timeout/bounded retry/fail-fast bulkhead
 ```
 
 Hard rule:
@@ -530,10 +532,11 @@ Correct RPC flow:
 ```text
 WebFlux request
  -> ReactiveRabbitRpcClient
+ -> dedicated RPC bridge executor
  -> AsyncRabbitTemplate convertSendAndReceive
  -> CompletableFuture
- -> Mono.fromFuture
- -> timeout/retry/circuit-breaker/bulkhead
+ -> Mono boundary
+ -> timeout/bounded retry/fail-fast bulkhead
  -> response or caller-visible failure
 ```
 
@@ -542,14 +545,16 @@ RPC reliability features:
 ```text
 timeout
 retry for retryable RPC failures
-circuit breaker
-bulkhead
+fail-fast bounded bulkhead
 correlation id
-trace propagation
+RPC headers
 metrics
-structured logs
-optional audit
+raw or envelope responses
+ParameterizedTypeReference<T> responses
+platform or virtual-thread executor mode
 ```
+
+Rabbit RPC circuit-breaker integration, tracing integration, structured logging, and audit are not implemented in this RPC bridge phase.
 
 RPC does not use by default:
 
@@ -638,5 +643,6 @@ Final recommendation:
 Keep WebFlux Rabbit event messaging as a blocking bridge.
 Keep Rabbit RPC in a separate AsyncRabbitTemplate module.
 Keep outbox/idempotency/retry/DLQ semantics attached to event messaging.
-Keep timeout/retry/circuit-breaker/bulkhead semantics attached to RPC.
+Keep timeout, bounded retry, and fail-fast bulkhead semantics attached to RPC.
+Rabbit RPC circuit-breaker integration is not implemented.
 ```

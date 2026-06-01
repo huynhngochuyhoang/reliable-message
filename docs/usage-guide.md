@@ -12,7 +12,7 @@ Reliable Message provides effectively-once message processing patterns through o
 | Blocking Spring MVC service with Kafka | MVC starter + Kafka MVC adapter | Hiding Kafka semantics behind Rabbit assumptions. |
 | Reactive WebFlux service with Kafka | WebFlux starter + Kafka WebFlux adapter | JDBC or blocking Redis in reactive flow. |
 | WebFlux service that must use RabbitMQ | Rabbit WebFlux blocking bridge | Calling `RabbitTemplate` on event-loop threads. |
-| Request/response over RabbitMQ | Rabbit RPC bridge direction with `AsyncRabbitTemplate` | Event outbox and DLQ as normal RPC flow. |
+| Request/response over RabbitMQ | `reliable-message-rpc-rabbit-webflux-bridge` with `AsyncRabbitTemplate` | Event outbox and DLQ as normal RPC flow. |
 | Compliance capture | Audit extension | Treating observability logs as audit records. |
 
 Current positioning:
@@ -188,7 +188,6 @@ message:
     rabbit:
       bridge:
         executor-mode: virtual-thread
-        queue-capacity: 1000
         max-concurrency: 1000
         rejection-policy: fail-fast
 ```
@@ -287,7 +286,23 @@ reliable-message-outbox-r2dbc
 reliable-message-idempotency-r2dbc or reliable-message-idempotency-redis-reactive
 ```
 
-R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
+R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. Provision the `message_outbox` table with a database migration before enabling it; auto-configuration does not call `R2dbcOutboxStore.initializeSchema()`. R2DBC outbox and R2DBC idempotency providers require a `ConnectionFactory`, typically from `spring-boot-starter-data-r2dbc`, a compatible driver, and `spring.r2dbc.*` configuration. Reactive Redis idempotency requires `spring-boot-starter-data-redis-reactive` or an application-provided `ReactiveStringRedisTemplate`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
+
+Reactive flusher configuration:
+
+```yaml
+message:
+  reliability:
+    outbox:
+      enabled: true
+      flush-enabled: true
+      batch-size: 100
+      flush-delay: 5s
+      retry-delay: 30s
+      publish-timeout: 30s
+```
+
+The R2DBC outbox requires a `ConnectionFactory`, typically from `spring-boot-starter-data-r2dbc`, a compatible driver, and `spring.r2dbc.*` configuration. The flusher reads claimed rows, publishes through the active `ReactiveReliablePublisher`, marks rows published only after success, and marks failures with retry metadata. RPC does not use this flusher by default.
 
 ### R2DBC Outbox Schema Configuration
 
@@ -361,6 +376,16 @@ message:
 
 Binary mode is not supported by the current runtime store. Configuring `payload-storage: binary` fails fast with a clear startup error until a compatible payload codec and `payload_bytes` read/write path are implemented.
 
+### R2DBC Outbox Claim Strategy
+
+Claiming is dialect-aware:
+
+- The non-PostgreSQL fallback uses select-ID plus conditional-update claiming with `LIMIT` pagination. Use it only with databases that support that syntax.
+- PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` claiming without a window function in the locked query.
+- MySQL, Oracle and SQL Server optimized claim strategies are not implemented yet. Oracle and SQL Server are not supported by the current `LIMIT`-based fallback.
+
+A worker only publishes rows it successfully claimed. Processing lease behavior remains available for reclaiming expired `PROCESSING` rows.
+
 Publish:
 
 ```java
@@ -419,43 +444,75 @@ Start with the dedicated usage page:
 
 [Rabbit WebFlux bridge usage](rabbit-webflux-bridge-usage.md)
 
-## Rabbit RPC Bridge
+## Rabbit RPC WebFlux Bridge
 
-Rabbit RPC is request/response. It is separate from event messaging. `AsyncRabbitTemplate` is RPC only. RPC does not use outbox by default.
+Rabbit RPC is request/response. It is separate from event messaging. Use the dedicated module:
 
-Current status: planned, not implemented in this repository yet. There is no `reliable-message-rpc-rabbit-webflux-bridge` module and no `ReactiveRabbitRpcClient` implementation available today.
-
-Planned direction:
-
-```text
-ReactiveRabbitRpcClient
-AsyncRabbitTemplate
-Mono.fromFuture
-timeout/retry/circuit-breaker/bulkhead
+```xml
+<dependency>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-rpc-rabbit-webflux-bridge</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
 ```
 
-Do not use:
-
-```text
-RabbitTemplate for RPC
-AsyncRabbitTemplate for event publishing
-outbox for normal RPC by default
-Rabbit event retry queues as RPC retry semantics
-```
-
-Planned conceptual flow:
+The RPC bridge uses `AsyncRabbitTemplate` only. It does not use `RabbitTemplate`, event outbox, Rabbit event retry queues, or DLQ as its normal request/response flow. The application must provide an `AsyncRabbitTemplate` bean configured with a `SmartMessageConverter`; the bridge auto-configuration does not create one. Provision the configured RPC exchange, responder queues, and route bindings separately. See the [Rabbit RPC WebFlux example](examples/rabbit-rpc-webflux.md) for the required bean and topology setup.
 
 ```text
 WebFlux caller
  -> ReactiveRabbitRpcClient
+ -> RPC bridge executor platform/virtual-thread
  -> AsyncRabbitTemplate request/reply
  -> CompletableFuture
- -> Mono.fromFuture
- -> timeout/retry/circuit-breaker/bulkhead
- -> response or error
+ -> Mono boundary
+ -> timeout / bounded retry / bounded fail-fast bulkhead
+ -> response or caller-visible error
 ```
 
-If a command must be durable, model it as an async command/event workflow instead of normal RPC.
+`AsyncRabbitTemplate` invocation is offloaded from the caller/event-loop thread because request creation may perform synchronous Spring AMQP work before returning its future. Timeout and cancellation are caller-visible, but may not cancel broker-side or remote work.
+
+Configuration:
+
+```yaml
+message:
+  reliability:
+    rpc:
+      rabbit:
+        webflux:
+          enabled: true
+          exchange: app.rpc
+          default-timeout: 2s
+          response-mode: raw
+          executor-mode: platform
+          executor-threads: 8
+          executor-queue-capacity: 256
+          max-concurrency: 64
+          max-attempts: 2
+          retry-backoff:
+            - 100ms
+```
+
+Use `response-mode: envelope` or `RpcOptions.envelope()` only when the responder returns `RpcResponseEnvelope<T>`. Envelope `ERROR` replies map to `RabbitRpcRemoteException` and are not Rabbit DLQ events.
+
+The bridge supports `ParameterizedTypeReference<T>` for generic responses. Platform and virtual-thread modes both remain bounded by `max-concurrency`. Virtual threads reduce blocking cost; they are not reactive and do not provide unlimited concurrency.
+
+Implemented RPC metrics:
+
+```text
+rpc_rabbit_requests_total
+rpc_rabbit_success_total
+rpc_rabbit_failed_total
+rpc_rabbit_timeout_total
+rpc_rabbit_retry_total
+rpc_rabbit_bulkhead_rejected_total
+rpc_rabbit_duration
+```
+
+Metrics include `runtime=webflux`, `transport=rabbit`, `rpc_client`, `route`, `status`, and `executor_mode` tags.
+
+Rabbit RPC circuit-breaker integration is not implemented. Retrying non-idempotent RPC can duplicate downstream side effects. For durable commands, use an asynchronous event workflow instead of normal RPC.
+
+See [Rabbit RPC WebFlux example](examples/rabbit-rpc-webflux.md).
 
 ## Optional RPC Context Propagation
 
@@ -556,6 +613,7 @@ Avoid these patterns:
 
 - Using `AsyncRabbitTemplate` for event publishing.
 - Using `RabbitTemplate` directly inside a WebFlux event-loop thread.
+- Using `RabbitTemplate` in the Rabbit RPC bridge.
 - Claiming the Rabbit WebFlux bridge is fully reactive RabbitMQ, native Reactor RabbitMQ, or non-blocking broker I/O.
 - Adding outbox to normal RPC by default.
 - Using JDBC inside a WebFlux reactive flow.
@@ -563,6 +621,7 @@ Avoid these patterns:
 - Acking before idempotency `markSuccess` succeeds.
 - Using unbounded `flatMap` or unbounded queues.
 - Treating virtual threads as unlimited concurrency.
+- Treating RPC retry like Rabbit event retry queues or DLQ.
 - Mixing `ReliablePublisher` and `ReliableRpcClient` behind a single generic transport API.
 - Treating observability logs as audit records.
 
@@ -573,7 +632,7 @@ For production readiness, verify:
 - Outbox backlog is visible when the outbox module and flush scheduler are configured.
 - Duplicate outcomes are visible.
 - Retry and DLQ/DLT outcomes are visible for event messaging.
-- Bridge executor active, queued and rejected metrics are visible for Rabbit WebFlux bridge.
-- RPC timeout, retry, circuit breaker and bulkhead outcomes are visible for RPC clients.
+- Bridge executor rejected metrics are visible for Rabbit WebFlux bridge. Active and queued gauges are platform-mode only.
+- RPC timeout, retry and bulkhead outcomes are visible for Rabbit RPC clients. Circuit-breaker integration is not implemented.
 - Audit failures follow the configured failure policy.
 - Full audit capture has retention, access control and security policy.
