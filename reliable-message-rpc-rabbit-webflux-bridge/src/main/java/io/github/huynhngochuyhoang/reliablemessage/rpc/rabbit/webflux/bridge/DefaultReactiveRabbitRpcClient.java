@@ -6,6 +6,7 @@ import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.RpcTimeoutPolicy;
 import io.github.huynhngochuyhoang.reliablemessage.rpc.webflux.ReactiveRpcContext;
 import io.micrometer.core.instrument.Timer;
+import org.springframework.amqp.core.AmqpReplyTimeoutException;
 import org.springframework.amqp.core.AsyncAmqpTemplate;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessagePostProcessor;
@@ -127,9 +128,6 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
                     .doOnError(error -> {
                         String status = status(error);
                         recordMetrics(() -> metrics.failure(route, status));
-                        if (exceptionClassifier.timeout(error)) {
-                            recordMetrics(() -> metrics.timeout(route));
-                        }
                         if (error instanceof RabbitRpcBridgeRejectedException) {
                             recordMetrics(() -> metrics.bulkheadRejected(route));
                         }
@@ -140,6 +138,9 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
 
     private <T> Mono<T> retry(String route, Mono<T> source, int attempt) {
         return source.onErrorResume(error -> {
+            if (timeout(error)) {
+                recordMetrics(() -> metrics.timeout(route));
+            }
             if (attempt >= properties.getMaxAttempts() || !retryable(error)) {
                 return Mono.error(error);
             }
@@ -151,7 +152,22 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
     }
 
     private boolean retryable(Throwable error) {
-        return !conversionFailure(error) && exceptionClassifier.retryable(error);
+        return !conversionFailure(error) && (timeout(error) || exceptionClassifier.retryable(error));
+    }
+
+    private boolean timeout(Throwable error) {
+        if (exceptionClassifier.timeout(error)) {
+            return true;
+        }
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof AmqpReplyTimeoutException) {
+                return true;
+            }
+            Throwable cause = current.getCause();
+            current = cause == current ? null : cause;
+        }
+        return false;
     }
 
     private static boolean conversionFailure(Throwable error) {
@@ -192,7 +208,7 @@ public class DefaultReactiveRabbitRpcClient implements ReactiveRabbitRpcClient {
         if (error instanceof RabbitRpcBridgeRejectedException) {
             return "bulkhead_rejected";
         }
-        if (exceptionClassifier.timeout(error)) {
+        if (timeout(error)) {
             return "timeout";
         }
         if (error instanceof RabbitRpcRemoteException) {

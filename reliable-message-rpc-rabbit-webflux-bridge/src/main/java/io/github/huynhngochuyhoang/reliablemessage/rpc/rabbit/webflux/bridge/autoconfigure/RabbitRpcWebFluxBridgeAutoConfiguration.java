@@ -12,6 +12,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 
+import java.util.List;
+
 @AutoConfiguration
 @ConditionalOnClass(AsyncRabbitTemplate.class)
 @ConditionalOnProperty(
@@ -37,10 +39,15 @@ public class RabbitRpcWebFluxBridgeAutoConfiguration {
             RabbitRpcWebFluxBridgeProperties properties,
             ObjectProvider<MeterRegistry> meterRegistryProvider
     ) {
+        List<MeterRegistry> registries = meterRegistryProvider.stream().toList();
+        if (registries.isEmpty()) {
+            return RabbitRpcMetrics.noop(properties.getExecutorMode());
+        }
         MeterRegistry meterRegistry = meterRegistryProvider.getIfUnique();
-        return meterRegistry == null
-                ? RabbitRpcMetrics.noop(properties.getExecutorMode())
-                : new RabbitRpcMetrics(meterRegistry, properties.getExecutorMode());
+        if (meterRegistry == null) {
+            throw new IllegalStateException("Multiple MeterRegistry beans found; mark one primary for Rabbit RPC bridge metrics");
+        }
+        return new RabbitRpcMetrics(meterRegistry, properties.getExecutorMode());
     }
 
     @Bean

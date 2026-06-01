@@ -7,10 +7,7 @@ import io.github.huynhngochuyhoang.reliablemessage.rpc.webflux.ReactiveRpcContex
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.core.AsyncAmqpTemplate;
-import org.springframework.amqp.core.Message;
-import org.springframework.amqp.core.MessagePostProcessor;
-import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.core.*;
 import org.springframework.amqp.support.converter.MessageConversionException;
 import org.springframework.core.ParameterizedTypeReference;
 import reactor.core.Disposable;
@@ -66,6 +63,48 @@ class RabbitRpcResilienceTest {
                 .verifyComplete();
 
         assertThat(template.invocationCount).isEqualTo(2);
+    }
+
+    @Test
+    void recordsRecoveredTimeoutAttempt() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        RabbitRpcMetrics metrics = new RabbitRpcMetrics(registry, RabbitRpcExecutorMode.PLATFORM);
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        template.addFuture(new CompletableFuture<>());
+        template.addFuture(CompletableFuture.completedFuture("reply"));
+        RabbitRpcWebFluxBridgeProperties properties = retryProperties(2, Duration.ZERO);
+        properties.setDefaultTimeout(Duration.ofMillis(10));
+        DefaultReactiveRabbitRpcClient client = new DefaultReactiveRabbitRpcClient(
+                template, properties, new SchedulerBackedProvider(Schedulers.immediate()), metrics);
+
+        StepVerifier.withVirtualTime(() -> client.request("orders.lookup", "request", String.class))
+                .thenAwait(Duration.ofMillis(10))
+                .expectNext("reply")
+                .verifyComplete();
+
+        assertThat(counter(registry, "rpc_rabbit_timeout_total", "route", "orders.lookup")).isEqualTo(1.0);
+    }
+
+    @Test
+    void retriesNativeAmqpReplyTimeout() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        RabbitRpcMetrics metrics = new RabbitRpcMetrics(registry, RabbitRpcExecutorMode.PLATFORM);
+        RecordingAsyncAmqpTemplate template = new RecordingAsyncAmqpTemplate();
+        CompletableFuture<Object> timedOut = new CompletableFuture<>();
+        timedOut.completeExceptionally(new AmqpReplyTimeoutException(
+                "Reply timed out", new Message(new byte[0], new MessageProperties())));
+        template.addFuture(timedOut);
+        template.addFuture(CompletableFuture.completedFuture("reply"));
+        RabbitRpcWebFluxBridgeProperties properties = retryProperties(2, Duration.ZERO);
+        DefaultReactiveRabbitRpcClient client = new DefaultReactiveRabbitRpcClient(
+                template, properties, new SchedulerBackedProvider(Schedulers.immediate()), metrics);
+
+        StepVerifier.create(client.request("orders.lookup", "request", String.class))
+                .expectNext("reply")
+                .verifyComplete();
+
+        assertThat(template.invocationCount).isEqualTo(2);
+        assertThat(counter(registry, "rpc_rabbit_timeout_total", "route", "orders.lookup")).isEqualTo(1.0);
     }
 
     @Test
