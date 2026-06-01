@@ -3,6 +3,8 @@ package io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 @ConfigurationProperties(prefix = "message.reliability.rpc.rabbit.webflux")
 public class RabbitRpcWebFluxBridgeProperties {
@@ -15,6 +17,8 @@ public class RabbitRpcWebFluxBridgeProperties {
     private RabbitRpcExecutorMode executorMode = RabbitRpcExecutorMode.PLATFORM;
     private int maxConcurrency = 100;
     private RpcResponseMode responseMode = RpcResponseMode.RAW;
+    private int maxAttempts = 1;
+    private List<Duration> retryBackoff = List.of(Duration.ZERO);
 
     public boolean isEnabled() {
         return enabled;
@@ -96,5 +100,33 @@ public class RabbitRpcWebFluxBridgeProperties {
             throw new IllegalArgumentException("responseMode must not be null");
         }
         this.responseMode = responseMode;
+    }
+
+    public int getMaxAttempts() {
+        return maxAttempts;
+    }
+
+    public void setMaxAttempts(int maxAttempts) {
+        if (maxAttempts <= 0) {
+            throw new IllegalArgumentException("maxAttempts must be positive");
+        }
+        this.maxAttempts = maxAttempts;
+    }
+
+    public List<Duration> getRetryBackoff() {
+        return retryBackoff;
+    }
+
+    public void setRetryBackoff(List<Duration> retryBackoff) {
+        if (retryBackoff == null || retryBackoff.isEmpty()) {
+            this.retryBackoff = List.of(Duration.ZERO);
+            return;
+        }
+        for (Duration duration : retryBackoff) {
+            if (duration == null || duration.isNegative()) {
+                throw new IllegalArgumentException("retryBackoff entries must not be null or negative");
+            }
+        }
+        this.retryBackoff = List.copyOf(new ArrayList<>(retryBackoff));
     }
 }

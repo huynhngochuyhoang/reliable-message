@@ -6,6 +6,8 @@ import io.github.huynhngochuyhoang.reliablemessage.rpc.rabbit.webflux.bridge.aut
 import io.github.huynhngochuyhoang.reliablemessage.webflux.OutboxMessage;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveOutboxStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
@@ -49,7 +51,8 @@ class RabbitRpcWebFluxBridgeAutoConfigurationTest {
     void doesNotCreateReactiveRabbitRpcClientWithoutAsyncRabbitTemplate() {
         contextRunner.run(context -> assertThat(context)
                 .hasSingleBean(RabbitRpcWebFluxBridgeProperties.class)
-                .doesNotHaveBean(ReactiveRabbitRpcClient.class));
+                .doesNotHaveBean(ReactiveRabbitRpcClient.class)
+                .doesNotHaveBean(RabbitRpcMetrics.class));
     }
 
     @Test
@@ -70,6 +73,20 @@ class RabbitRpcWebFluxBridgeAutoConfigurationTest {
                         .hasSingleBean(ReactiveRabbitRpcClient.class)
                         .doesNotHaveBean(ReactiveReliablePublisher.class)
                         .doesNotHaveBean("reactiveRabbitBridgeListenerRegistrar"));
+    }
+
+    @Test
+    void failsFastWhenMeterRegistriesAreAmbiguous() {
+        contextRunner
+                .withBean(AsyncRabbitTemplate.class, RabbitRpcWebFluxBridgeAutoConfigurationTest::asyncRabbitTemplate)
+                .withBean("firstMeterRegistry", MeterRegistry.class, SimpleMeterRegistry::new)
+                .withBean("secondMeterRegistry", MeterRegistry.class, SimpleMeterRegistry::new)
+                .run(context -> assertThat(context)
+                        .hasFailed()
+                        .getFailure()
+                        .rootCause()
+                        .hasMessageContaining("Multiple MeterRegistry beans found")
+                        .hasMessageContaining("mark one primary"));
     }
 
     @Test
