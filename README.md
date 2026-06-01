@@ -20,6 +20,7 @@ For architecture diagrams and usage, start here:
 - [Architecture flow](docs/architecture-flow.md)
 - [Usage guide](docs/usage-guide.md)
 - [Rabbit WebFlux blocking bridge](docs/rabbit-webflux-bridge-usage.md)
+- [Rabbit RPC WebFlux example](docs/examples/rabbit-rpc-webflux.md)
 
 ## Choose A Stack
 
@@ -30,7 +31,8 @@ For architecture diagrams and usage, start here:
 | Spring WebFlux + Kafka | `reliable-message-webflux-starter` + `reliable-message-kafka-webflux` |
 | Spring WebFlux + RabbitMQ | `reliable-message-rabbit-webflux-bridge` blocking bridge |
 | WebFlux persistence | R2DBC or Reactive Redis modules |
-| RPC propagation | `reliable-message-rpc-mvc` or `reliable-message-rpc-webflux` |
+| Rabbit request/reply from WebFlux | `reliable-message-rpc-rabbit-webflux-bridge` RPC bridge |
+| HTTP RPC propagation | `reliable-message-rpc-mvc` or `reliable-message-rpc-webflux` |
 | Audit logging | `reliable-message-audit-mvc` or `reliable-message-audit-webflux` |
 
 RabbitMQ is production-oriented for MVC. WebFlux services should prefer Kafka for reactive messaging. If a WebFlux service must use RabbitMQ, use the Rabbit WebFlux blocking bridge as hybrid mode and migration support; it is not native Reactor RabbitMQ.
@@ -113,6 +115,7 @@ Transports:
 - `reliable-message-kafka-mvc`
 - `reliable-message-kafka-webflux`
 - `reliable-message-rabbit-webflux-bridge`
+- `reliable-message-rpc-rabbit-webflux-bridge`
 
 Storage:
 
@@ -139,6 +142,7 @@ Operations and extensions:
 - [Architecture flow](docs/architecture-flow.md)
 - [Usage guide](docs/usage-guide.md)
 - [Rabbit WebFlux blocking bridge](docs/rabbit-webflux-bridge-usage.md)
+- [Rabbit RPC WebFlux example](docs/examples/rabbit-rpc-webflux.md)
 - [MVC RabbitMQ](docs/mvc-rabbit-milestone-01-06.md)
 - [MVC Kafka](docs/mvc-kafka-milestone-07.md)
 - [WebFlux core](docs/webflux-core-milestone-08.md)

@@ -70,6 +70,7 @@ Defaults:
 | `message.reliability.outbox.batch-size` | `100` | Maximum pending rows loaded per flush. |
 | `message.reliability.outbox.flush-delay` | `5s` | Delay between scheduled flush attempts. |
 | `message.reliability.outbox.retry-delay` | `30s` | Delay before a failed outbox row becomes eligible again. |
+| `message.reliability.outbox.publish-timeout` | `30s` | Timeout applied to publish and store stages so a hung stage cannot stall flushing forever. |
 
 ## Flush Flow
 
@@ -82,11 +83,16 @@ sequenceDiagram
 
     Scheduler->>Store: findPending(batchSize)
     Store-->>Scheduler: PROCESSING outbox rows
-    loop sequential rows
+    loop bounded concurrent rows
         Scheduler->>Publisher: publish(eventName, payload, options)
         Publisher->>Transport: publish through existing transport publisher
         alt publish succeeds
             Scheduler->>Store: markPublished(id)
+            alt markPublished succeeds
+                Store-->>Scheduler: row is PUBLISHED
+            else markPublished fails
+                Scheduler->>Store: markFailed(id, error, now + retryDelay)
+            end
         else publish fails
             Scheduler->>Store: markFailed(id, error, now + retryDelay)
         end
@@ -95,10 +101,10 @@ sequenceDiagram
 
 Important details:
 
-- Pending rows are processed sequentially with bounded processing.
+- Claimed rows are processed with bounded concurrency capped by `batch-size`.
 - Flush ticks do not overlap. If a previous flush is still running, the next tick is skipped.
 - `markPublished` happens only after transport publish succeeds.
-- `markFailed` happens only when transport publish fails.
+- `markFailed` records publish failures and post-publish `markPublished` failures or timeouts.
 - The flusher calls `ReactiveReliablePublisher`; it does not use `RabbitTemplate`, `KafkaSender`, JDBC, or `AsyncRabbitTemplate` directly.
 
 ## Kafka WebFlux Wiring
@@ -162,6 +168,12 @@ It is not created for the RPC WebFlux module because RPC does not provide a `Rea
 ## Schema
 
 `R2dbcOutboxStore` exposes `initializeSchema()` for tests or simple local usage. Production applications should normally manage the `message_outbox` schema with migrations.
+
+## Schema And Claim Strategy
+
+Schema column types resolve in this order: explicit user configuration, dialect recommendation, then generic fallback. `text` and `json` payload storage are supported. `binary` is planned and fails fast until runtime codec and `payload_bytes` persistence support exist. PostgreSQL JSON uses dialect-aware `json/jsonb` binding.
+
+Claiming is dialect-aware. Generic databases use conditional update claiming. PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` with `UPDATE ... RETURNING` and no window function in the locked query. MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet.
 
 ## Out Of Scope
 

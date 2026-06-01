@@ -28,6 +28,26 @@ Add R2DBC outbox when the WebFlux service must flush durable event rows through 
 
 Outbox remains event-messaging only. Do not use outbox for normal RPC.
 
+Add one reactive idempotency provider. This Redis example is auto-configured when Spring provides a reactive Redis template:
+
+```xml
+<dependency>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-idempotency-redis-reactive</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+```
+
+The Rabbit bridge listener currently uses a 24-hour idempotency TTL internally. It does not expose a Rabbit-bridge TTL property yet. `reliable-message-idempotency-r2dbc` is the reactive database alternative.
+
 ## Platform Executor Configuration
 
 ```yaml
@@ -69,7 +89,6 @@ message:
       bridge:
         enabled: true
         executor-mode: virtual-thread
-        queue-capacity: 1000
         max-concurrency: 1000
         rejection-policy: fail-fast
 ```
@@ -110,7 +129,9 @@ message:
         last-error-column-type: clob
 ```
 
-`payload-storage: binary` is planned, not supported by the current runtime store. It fails fast until binary payload codec and `payload_bytes` read/write support are implemented.
+`payload-storage: binary` is planned, not supported by the current runtime store. It fails fast until binary payload codec and `payload_bytes` read/write support are implemented. PostgreSQL JSON mode uses dialect-aware `json/jsonb` binding.
+
+Claim strategy is dialect-aware: generic databases use conditional update claiming; PostgreSQL uses atomic `FOR UPDATE SKIP LOCKED` plus `UPDATE ... RETURNING` without a window function. MySQL, Oracle, and SQL Server optimized claim strategies are not implemented yet.
 
 ## Publish An Event
 
@@ -219,6 +240,8 @@ Spring AMQP listener thread
 
 Ack happens only after the handler `Mono` and idempotency `markSuccess` complete successfully. Strategy B async ack coordination is not implemented.
 
+Handler failures are nacked and pass through the minimal event failure hook. Retry and DLQ outcome metrics are emitted only when the configured hook returns a concrete outcome. Advanced retry/DLQ topology creation is not included in this bridge phase.
+
 ## Fail-Fast Rejection
 
 When bridge capacity is exhausted, publish fails with:
@@ -255,8 +278,8 @@ message_rabbit_bridge_consume_total
 message_rabbit_bridge_duplicate_total
 message_rabbit_bridge_failure_outcome_total
 message_rabbit_bridge_executor_rejected_total
-message_rabbit_bridge_executor_active
-message_rabbit_bridge_executor_queued
+message_rabbit_bridge_executor_active  # platform mode only
+message_rabbit_bridge_executor_queued  # platform mode only
 ```
 
 ## Do Not Do This

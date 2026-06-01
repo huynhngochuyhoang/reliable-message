@@ -431,7 +431,7 @@ virtual threads do not remove backpressure concerns
 
 Rabbit RPC is separate from Rabbit event messaging.
 
-Planned WebFlux Rabbit RPC module:
+Implemented WebFlux Rabbit RPC module:
 
 ```text
 reliable-message-rpc-rabbit-webflux-bridge
@@ -447,13 +447,17 @@ Transport implementation:
 
 ```text
 AsyncRabbitTemplate request/reply
-CompletableFuture bridge
-Mono.fromFuture
-RPC timeout/retry/circuit-breaker/bulkhead
-RPC metrics and tracing
+dedicated RPC bridge executor offload
+CompletableFuture to Mono boundary
+caller-visible timeout
+bounded RPC retry and fail-fast bulkhead
+raw or envelope responses
+ParameterizedTypeReference<T> responses
+platform or virtual-thread executor mode
+RPC metrics
 ```
 
-RPC does not use outbox by default. If a command must be durable, model it as an async command/event workflow instead of normal RPC.
+RPC does not use outbox by default. Rabbit RPC circuit-breaker integration is not implemented. If a command must be durable, model it as an async command/event workflow instead of normal RPC.
 
 ## 9. Observability
 
@@ -578,7 +582,14 @@ Milestone 14 event bridge order:
 14.6 idempotency, duplicate and failure semantics
 14.7 event-loop protection and bounded overload behavior
 14.8 bridge observability
-14.9+ separate Rabbit RPC bridge using AsyncRabbitTemplate
+14.8.1 reactive R2DBC outbox flusher
+14.8.2 dialect-aware R2DBC outbox schema configuration
+14.8.3 generic and PostgreSQL optimized outbox claim strategies
+14.9 separate Rabbit RPC bridge using AsyncRabbitTemplate
+14.10 Rabbit RPC request/response
+14.10.1 Rabbit RPC typing, envelope and executor hardening
+14.11 bounded Rabbit RPC retry, bulkhead and metrics
+14.12 user-facing documentation and limitations
 ```
 
 ## 12. Design Rules
@@ -611,7 +622,8 @@ Transport rules:
 RabbitTemplate belongs to event messaging.
 AsyncRabbitTemplate belongs to Rabbit RPC.
 Outbox belongs to event messaging, not normal RPC.
-Rabbit retry/DLQ is not RPC retry/circuit-breaker behavior.
+Rabbit retry/DLQ is not RPC retry or bulkhead behavior.
+Rabbit RPC circuit-breaker integration is not implemented.
 ```
 
 Final recommendation:
