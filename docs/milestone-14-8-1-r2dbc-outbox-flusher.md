@@ -22,11 +22,21 @@ Use the R2DBC outbox with a WebFlux event transport:
 
 ```xml
 <dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>r2dbc-postgresql</artifactId>
+</dependency>
+<dependency>
   <groupId>io.github.huynhngochuyhoang</groupId>
   <artifactId>reliable-message-outbox-r2dbc</artifactId>
   <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
+
+The outbox auto-configuration requires a `ConnectionFactory`. Spring Boot creates it from `spring.r2dbc.*` when the R2DBC starter and a compatible driver are present. Applications may provide a custom `ConnectionFactory` instead. The PostgreSQL dependency above is an example; use the driver for your database.
 
 Kafka WebFlux also needs:
 

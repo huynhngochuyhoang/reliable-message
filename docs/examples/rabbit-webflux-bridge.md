@@ -20,6 +20,14 @@ Add R2DBC outbox when the WebFlux service must flush durable event rows through 
 
 ```xml
 <dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>r2dbc-postgresql</artifactId>
+</dependency>
+<dependency>
   <groupId>io.github.huynhngochuyhoang</groupId>
   <artifactId>reliable-message-outbox-r2dbc</artifactId>
   <version>0.1.0-SNAPSHOT</version>
@@ -31,6 +39,10 @@ Outbox remains event-messaging only. Do not use outbox for normal RPC.
 Add one reactive idempotency provider. This Redis example is auto-configured when Spring provides a reactive Redis template:
 
 ```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+</dependency>
 <dependency>
   <groupId>io.github.huynhngochuyhoang</groupId>
   <artifactId>reliable-message-idempotency-redis-reactive</artifactId>
@@ -46,7 +58,17 @@ spring:
       port: 6379
 ```
 
-The Rabbit bridge listener currently uses a 24-hour idempotency TTL internally. It does not expose a Rabbit-bridge TTL property yet. `reliable-message-idempotency-r2dbc` is the reactive database alternative.
+The Redis provider requires a `ReactiveStringRedisTemplate`; Spring Boot creates it from the reactive Redis starter and connection configuration. The Rabbit bridge listener currently uses a 24-hour idempotency TTL internally. It does not expose a Rabbit-bridge TTL property yet. `reliable-message-idempotency-r2dbc` is the reactive database alternative and requires the same `ConnectionFactory` infrastructure as the R2DBC outbox.
+
+The R2DBC outbox requires a `ConnectionFactory`. Spring Boot creates it from `spring.r2dbc.*` when the R2DBC starter and compatible driver are present. The PostgreSQL dependency above is an example; use the driver for your database:
+
+```yaml
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/orders
+    username: orders
+    password: change-me
+```
 
 ## Platform Executor Configuration
 

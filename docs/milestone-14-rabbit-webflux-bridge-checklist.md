@@ -438,7 +438,7 @@ Goal:
 - [x] Add normal RPC resilience without event outbox, retry queue, or DLQ semantics.
 
 Implemented direction:
-- [x] Retry bounded retryable timeout and transient transport/future failures.
+- [x] Retry Reactor timeout, native `AmqpReplyTimeoutException`, and failures rooted in `IOException` within configured attempt bounds.
 - [x] Do not retry remote `ERROR` envelopes or conversion failures by default.
 - [x] Reuse RPC executor `max-concurrency` as the fail-fast bounded bulkhead.
 - [x] Record RPC-specific request, success, failure, timeout, retry, bulkhead rejection, and duration metrics.

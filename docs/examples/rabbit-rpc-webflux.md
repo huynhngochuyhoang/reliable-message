@@ -14,6 +14,30 @@ Use this module for RabbitMQ request/response from a WebFlux application. It is 
 
 The module uses `AsyncRabbitTemplate` only. It does not use `RabbitTemplate`, event outbox, event retry queues, or DLQ as the normal RPC flow.
 
+## Required AsyncRabbitTemplate Bean
+
+The RPC bridge auto-configuration requires an `AsyncRabbitTemplate` bean. Add Spring AMQP infrastructure and declare the bean:
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-amqp</artifactId>
+</dependency>
+```
+
+```java
+@Configuration
+class RabbitRpcConfiguration {
+
+    @Bean
+    AsyncRabbitTemplate asyncRabbitTemplate(RabbitTemplate rabbitTemplate) {
+        return new AsyncRabbitTemplate(rabbitTemplate);
+    }
+}
+```
+
+Spring Boot configures the `RabbitTemplate` and Rabbit connection infrastructure from `spring.rabbitmq.*`. The RPC bridge consumes the `AsyncRabbitTemplate`; it does not create one.
+
 ## Platform Executor Configuration
 
 ```yaml
@@ -140,7 +164,7 @@ Timeout is caller-visible. Cancellation attempts to cancel the client-side futur
 
 ## Retry And Bulkhead
 
-RPC retry is bounded by `max-attempts` and `retry-backoff`. Retry applies to retryable timeout and transient transport/future failures. Remote `ERROR` envelopes and reply conversion failures are not retried by default.
+RPC retry is bounded by `max-attempts` and `retry-backoff`. Retry applies to Reactor timeout, native `AmqpReplyTimeoutException`, and failures whose root cause is `IOException`. Other Spring AMQP exceptions are not retried by default. Remote `ERROR` envelopes and reply conversion failures are not retried by default.
 
 The RPC executor `max-concurrency` guard is the bounded fail-fast bulkhead. No unbounded queueing or block-caller mode is added. Rabbit RPC circuit-breaker integration is not implemented.
 

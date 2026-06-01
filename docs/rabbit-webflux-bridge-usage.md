@@ -151,6 +151,10 @@ Add one reactive idempotency provider. For Redis:
 
 ```xml
 <dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+</dependency>
+<dependency>
   <groupId>io.github.huynhngochuyhoang</groupId>
   <artifactId>reliable-message-idempotency-redis-reactive</artifactId>
   <version>0.1.0-SNAPSHOT</version>
@@ -165,7 +169,7 @@ spring:
       port: 6379
 ```
 
-The bridge auto-wires an available `ReactiveIdempotencyStore`. The current Rabbit bridge listener uses a 24-hour idempotency TTL internally; there is no Rabbit-bridge TTL configuration property yet. Use `reliable-message-idempotency-r2dbc` instead when R2DBC-backed idempotency is required.
+The Redis provider auto-configuration requires a `ReactiveStringRedisTemplate`. Spring Boot creates it when the reactive Redis starter and Redis connection configuration are present. The bridge auto-wires the resulting `ReactiveIdempotencyStore`. The current Rabbit bridge listener uses a 24-hour idempotency TTL internally; there is no Rabbit-bridge TTL configuration property yet. Use `reliable-message-idempotency-r2dbc` instead when R2DBC-backed idempotency is required; it requires the same `ConnectionFactory` infrastructure as the R2DBC outbox.
 
 ## Consume Events
 
@@ -311,6 +315,30 @@ Virtual-thread mode does not emit active/queued executor gauges because it uses 
 
 Add `reliable-message-outbox-r2dbc` when durable WebFlux event rows should be flushed through the active `ReactiveReliablePublisher`:
 
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>r2dbc-postgresql</artifactId>
+</dependency>
+<dependency>
+  <groupId>io.github.huynhngochuyhoang</groupId>
+  <artifactId>reliable-message-outbox-r2dbc</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/orders
+    username: orders
+    password: change-me
+```
+
 ```yaml
 message:
   reliability:
@@ -325,7 +353,7 @@ message:
         payload-storage: json
 ```
 
-The flusher reads claimed rows, publishes through `ReactiveReliablePublisher`, calls `markPublished` only after publish success, and calls `markFailed` when publish or post-publish persistence fails. It is event messaging only. RPC does not use outbox by default.
+The outbox auto-configuration requires a `ConnectionFactory`. Spring Boot creates it from `spring.r2dbc.*` when the R2DBC starter and a compatible driver are present. The PostgreSQL dependency above is an example; use the driver for your database. The flusher reads claimed rows, publishes through `ReactiveReliablePublisher`, calls `markPublished` only after publish success, and calls `markFailed` when publish or post-publish persistence fails. It is event messaging only. RPC does not use outbox by default.
 
 Schema type resolution is: user explicit config, then dialect recommendation, then generic fallback. `text` and `json` storage modes are supported. `binary` is planned and fails fast until runtime codec and `payload_bytes` read/write support exist. PostgreSQL `json/jsonb` uses dialect-aware binding.
 

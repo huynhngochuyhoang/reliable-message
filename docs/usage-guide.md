@@ -286,7 +286,7 @@ reliable-message-outbox-r2dbc
 reliable-message-idempotency-r2dbc or reliable-message-idempotency-redis-reactive
 ```
 
-R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
+R2DBC outbox flushing is opt-in with `message.reliability.outbox.enabled=true`. R2DBC outbox and R2DBC idempotency providers require a `ConnectionFactory`, typically from `spring-boot-starter-data-r2dbc`, a compatible driver, and `spring.r2dbc.*` configuration. Reactive Redis idempotency requires `spring-boot-starter-data-redis-reactive` or an application-provided `ReactiveStringRedisTemplate`. See [Milestone 14.8.1 R2DBC outbox flusher](milestone-14-8-1-r2dbc-outbox-flusher.md).
 
 Reactive flusher configuration:
 
@@ -302,7 +302,7 @@ message:
       publish-timeout: 30s
 ```
 
-The flusher reads claimed rows, publishes through the active `ReactiveReliablePublisher`, marks rows published only after success, and marks failures with retry metadata. RPC does not use this flusher by default.
+The R2DBC outbox requires a `ConnectionFactory`, typically from `spring-boot-starter-data-r2dbc`, a compatible driver, and `spring.r2dbc.*` configuration. The flusher reads claimed rows, publishes through the active `ReactiveReliablePublisher`, marks rows published only after success, and marks failures with retry metadata. RPC does not use this flusher by default.
 
 ### R2DBC Outbox Schema Configuration
 
@@ -456,7 +456,7 @@ Rabbit RPC is request/response. It is separate from event messaging. Use the ded
 </dependency>
 ```
 
-The RPC bridge uses `AsyncRabbitTemplate` only. It does not use `RabbitTemplate`, event outbox, Rabbit event retry queues, or DLQ as its normal request/response flow.
+The RPC bridge uses `AsyncRabbitTemplate` only. It does not use `RabbitTemplate`, event outbox, Rabbit event retry queues, or DLQ as its normal request/response flow. The application must provide an `AsyncRabbitTemplate` bean; the bridge auto-configuration does not create one. See the [Rabbit RPC WebFlux example](examples/rabbit-rpc-webflux.md) for the required bean setup.
 
 ```text
 WebFlux caller
