@@ -13,7 +13,7 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaMvcSampleContextSmokeTest {
 
@@ -29,14 +29,12 @@ class KafkaMvcSampleContextSmokeTest {
     @Test
     void mvcKafkaSampleContextLoads() {
         contextRunner.run(context -> {
-            assertThat(context)
-                    .hasSingleBean(KafkaReliableMessageProperties.class)
-                    .hasSingleBean(ReliablePublisher.class)
-                    .hasSingleBean(KafkaReliableListenerRegistrar.class)
-                    .doesNotHaveBean("reactiveRabbitRpcClient")
-                    .doesNotHaveBean("reactiveRabbitBridgePublisher");
-            assertThat(context.getEnvironment().getProperty("message.reliability.outbox.schema.payload-storage"))
-                    .isNull();
+            assertEquals(1, context.getBeansOfType(KafkaReliableMessageProperties.class).size());
+            assertNotNull(context.getBean(ReliablePublisher.class));
+            assertNotNull(context.getBean(KafkaReliableListenerRegistrar.class));
+            assertFalse(context.containsBean("reactiveRabbitRpcClient"));
+            assertFalse(context.containsBean("reactiveRabbitBridgePublisher"));
+            assertNull(context.getEnvironment().getProperty("message.reliability.outbox.schema.payload-storage"));
         });
     }
 

@@ -21,7 +21,8 @@ class KafkaWebFluxSampleContextSmokeTest {
             .withUserConfiguration(SampleConfig.class)
             .withPropertyValues(
                     "message.reliability.transport=kafka",
-                    "message.reliability.service-name=orders"
+                    "message.reliability.service-name=orders",
+                    "message.reliability.kafka.listener-auto-startup=false"
             );
 
     @Test

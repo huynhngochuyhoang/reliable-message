@@ -13,7 +13,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
 
 class RabbitMvcSampleContextSmokeTest {
 
@@ -29,14 +29,12 @@ class RabbitMvcSampleContextSmokeTest {
     @Test
     void mvcRabbitSampleContextLoads() {
         contextRunner.run(context -> {
-            assertThat(context)
-                    .hasSingleBean(RabbitReliableMessageProperties.class)
-                    .hasSingleBean(ReliablePublisher.class)
-                    .hasSingleBean(RabbitReliableListenerRegistrar.class)
-                    .doesNotHaveBean("reactiveRabbitRpcClient")
-                    .doesNotHaveBean("reactiveRabbitBridgePublisher");
-            assertThat(context.getEnvironment().getProperty("message.reliability.outbox.schema.payload-storage"))
-                    .isNull();
+            assertEquals(1, context.getBeansOfType(RabbitReliableMessageProperties.class).size());
+            assertNotNull(context.getBean(ReliablePublisher.class));
+            assertNotNull(context.getBean(RabbitReliableListenerRegistrar.class));
+            assertFalse(context.containsBean("reactiveRabbitRpcClient"));
+            assertFalse(context.containsBean("reactiveRabbitBridgePublisher"));
+            assertNull(context.getEnvironment().getProperty("message.reliability.outbox.schema.payload-storage"));
         });
     }
 
