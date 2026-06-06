@@ -19,10 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -98,6 +95,38 @@ class RabbitReliableMessageHandlerTest {
         Channel channel = org.mockito.Mockito.mock(Channel.class);
 
         handler.onMessage(message(), channel);
+
+        assertNull(listener.lastMessage);
+        verify(channel, never()).basicAck(42L, false);
+        verify(channel).basicNack(42L, false, true);
+    }
+
+    @Test
+    void requeuesFailedDuplicateWithoutAcknowledging() throws Exception {
+        TestListener listener = new TestListener();
+        TestIdempotencyStore idempotencyStore = new TestIdempotencyStore(
+                IdempotencyStartResult.duplicate(IdempotencyState.FAILED)
+        );
+        RabbitReliableMessageHandler handler = handler(listener, "handle", idempotencyStore);
+        Channel channel = org.mockito.Mockito.mock(Channel.class);
+
+        handler.onMessage(message(), channel);
+
+        assertNull(listener.lastMessage);
+        verify(channel, never()).basicAck(42L, false);
+        verify(channel).basicNack(42L, false, true);
+    }
+
+    @Test
+    void invalidPayloadFollowsFailurePathWithoutInvokingHandler() throws Exception {
+        TestListener listener = new TestListener();
+        RabbitReliableMessageHandler handler = handler(listener, "handle");
+        Channel channel = org.mockito.Mockito.mock(Channel.class);
+        MessageProperties properties = new MessageProperties();
+        properties.setDeliveryTag(42L);
+        Message invalid = new Message("not-json".getBytes(java.nio.charset.StandardCharsets.UTF_8), properties);
+
+        assertThrows(RuntimeException.class, () -> handler.onMessage(invalid, channel));
 
         assertNull(listener.lastMessage);
         verify(channel, never()).basicAck(42L, false);

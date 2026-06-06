@@ -66,7 +66,7 @@ Out of scope:
 - Performance testing.
 - Adding production sample applications.
 
-## S2 MVC Rabbit
+## S2 MVC Rabbit - Done
 
 Goal:
 - Stabilize MVC Rabbit event messaging with publish, consume, idempotency, outbox, and Rabbit-native retry/DLQ behavior.
