@@ -20,9 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.*;
 
 class RabbitReliablePublisherTest {
 
@@ -67,8 +65,15 @@ class RabbitReliablePublisherTest {
 
         assertEquals("order.created", envelope.eventName());
         assertEquals("order-1", envelope.payload().orderId());
+        assertEquals("order-1", envelope.aggregateId());
+        assertEquals("event-1", envelope.idempotencyKey());
         assertEquals("correlation-1", envelope.correlationId());
+        assertEquals("order-1", envelope.headers().get(ReliableMessageHeaders.PARTITION_KEY));
+        assertEquals("order-1", message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.AGGREGATE_ID));
+        assertEquals("event-1", message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.IDEMPOTENCY_KEY));
+        assertEquals("order.created", message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.EVENT_NAME));
         assertEquals("correlation-1", message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.CORRELATION_ID));
+        assertEquals("order-1", message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.PARTITION_KEY));
         assertNotNull(message.getMessageProperties().getHeaders().get(ReliableMessageHeaders.MESSAGE_ID));
     }
 

@@ -17,11 +17,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class OutboxFlushSchedulerTest {
 
@@ -36,6 +32,22 @@ class OutboxFlushSchedulerTest {
         OutboxFlushScheduler scheduler = scheduler(outboxStore, publisher);
 
         assertEquals(1, scheduler.flushBatch());
+        verify(publisher).publish(eq("order.created"), eq("payload"), any(PublishOptions.class));
+        verify(outboxStore).markPublished("event-1");
+    }
+
+    @Test
+    void doesNotPublishAgainWhenStoreHasNoPendingRowsAfterSuccess() {
+        OutboxStore outboxStore = mock(OutboxStore.class);
+        ReliablePublisher publisher = mock(ReliablePublisher.class);
+        when(outboxStore.findPending(100))
+                .thenReturn(List.of(message()))
+                .thenReturn(List.of());
+
+        OutboxFlushScheduler scheduler = scheduler(outboxStore, publisher);
+
+        assertEquals(1, scheduler.flushBatch());
+        assertEquals(0, scheduler.flushBatch());
         verify(publisher).publish(eq("order.created"), eq("payload"), any(PublishOptions.class));
         verify(outboxStore).markPublished("event-1");
     }
