@@ -64,6 +64,7 @@ import static org.junit.jupiter.api.Assertions.*;
                 "message.reliability.rabbit.publisher-confirm=false",
                 "message.reliability.retry.attempts=2",
                 "message.reliability.retry.backoff[0]=100ms",
+                "message.reliability.outbox.flush-enabled=false",
                 "message.reliability.outbox.flush-delay=60s",
                 "spring.datasource.url=jdbc:h2:mem:s2-mvc-rabbit;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false",
                 "spring.datasource.username=sa",
