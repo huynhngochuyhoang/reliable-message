@@ -264,7 +264,7 @@ Spring AMQP listener thread
 
 Ack happens only after the handler `Mono` and idempotency `markSuccess` complete successfully. Strategy B async ack coordination is not implemented.
 
-Handler failures are nacked and pass through the minimal event failure hook. Retry and DLQ outcome metrics are emitted only when the configured hook returns a concrete outcome. Advanced retry/DLQ topology creation is not included in this bridge phase.
+Handler failures are nacked and pass through the minimal event failure hook. Retry and DLQ outcome metrics are emitted only when the configured hook returns a concrete outcome. Broker retry/DLQ routing is infrastructure-owned; the bridge does not create or own DLQ transport routing.
 
 ## Fail-Fast Rejection
 

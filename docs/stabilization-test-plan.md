@@ -117,10 +117,10 @@ Out of scope:
 - WebFlux Rabbit blocking bridge.
 - Binary payload storage.
 
-## S3 WebFlux Rabbit Blocking Bridge
+## S3 WebFlux Rabbit Blocking Bridge - Done
 
 Goal:
-- Stabilize Rabbit event messaging for WebFlux through the blocking bridge, including executor isolation, fail-fast overload, listener Strategy A, idempotency, and metrics.
+- Stabilize Rabbit event messaging for WebFlux through the blocking bridge, including executor isolation, fail-fast overload, listener Strategy A, idempotency, failure propagation, and metrics.
 
 Sample app/module involved:
 - `reliable-message-rabbit-webflux-bridge`.
@@ -135,6 +135,7 @@ Setup:
 - Run separate profiles for platform executor mode and virtual-thread executor mode.
 - Provision Rabbit event topology or enable supported event topology declaration.
 - Provide a reactive idempotency store for listener reliability tests.
+- Broker retry/DLQ routing is infrastructure-owned; this phase validates bridge failure propagation, nack behavior, and failure-hook outcomes only.
 
 Test cases:
 - Unit: `ReactiveRabbitBridgePublisher` serializes before submitting bridge work.
@@ -147,10 +148,11 @@ Test cases:
 - Integration: delayed handler `Mono` delays ack.
 - Integration: ack happens only after handler `Mono` completes and idempotency `markSuccess` succeeds.
 - Integration: handler failure calls `markFailed` and nacks or invokes the failure path, not success ack.
+- Integration: failure-hook retry/DLQ outcomes are observable when a hook reports them; transport retry/DLQ routing remains external infrastructure.
 - Integration: duplicate `SUCCESS` acks and skips handler.
 - Integration: duplicate `PROCESSING` and `FAILED` do not ack as success.
 - Integration: platform and virtual-thread modes both enforce `max-concurrency`.
-- Sample-app smoke: WebFlux endpoint publishes an event and listener processes it once.
+- Sample-app smoke: WebFlux endpoint publishes an event through auto-configured bridge beans and listener processes it once.
 
 Expected result:
 - Blocking Rabbit event work is isolated behind a dedicated bridge executor.
@@ -169,11 +171,13 @@ Pass criteria:
 - Unit, integration, and smoke tests pass for platform and virtual-thread modes.
 - Event bridge behavior is documented and observed as blocking bridge / hybrid mode.
 - No RPC behavior appears in event bridge tests.
+- Broker-backed smoke uses the auto-configured `ReactiveRabbitBridgeListenerRegistrar` path.
+- S3 is complete for failure propagation; bridge-owned retry/DLQ transport routing is not claimed.
 
 Out of scope:
 - Strategy B async ack coordination.
 - Rabbit RPC.
-- New retry/DLQ topology creation.
+- Bridge-owned retry/DLQ transport routing or topology creation.
 - Binary payload storage.
 
 ## S4 Rabbit RPC WebFlux

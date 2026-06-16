@@ -246,7 +246,7 @@ Ack rules:
 - New message: ack only after handler `Mono` completes and `markSuccess` succeeds.
 - Handler failure: mark failed where possible, then nack/failure hook.
 
-The bridge exposes a minimal event failure hook. Retry and DLQ outcome metrics are recorded only when a configured hook returns a concrete outcome. Advanced retry/DLQ topology creation is not part of this bridge phase.
+The bridge exposes a minimal event failure hook. Retry and DLQ outcome metrics are recorded only when a configured hook returns a concrete outcome. Broker retry/DLQ routing is infrastructure-owned; the bridge does not create or own DLQ transport routing.
 
 No Strategy B async ack coordination. Strategy B async ack coordination is not implemented.
 
