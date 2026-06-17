@@ -152,7 +152,7 @@ Test cases:
 - Integration: duplicate `SUCCESS` acks and skips handler.
 - Integration: duplicate `PROCESSING` and `FAILED` do not ack as success.
 - Integration: platform and virtual-thread modes both enforce `max-concurrency`.
-- Sample-app smoke: WebFlux endpoint publishes an event through auto-configured bridge beans and listener processes it once.
+- Sample-app smoke: WebFlux endpoint publishes an event through auto-configured bridge beans and listener processes it once in platform and virtual-thread executor modes.
 
 Expected result:
 - Blocking Rabbit event work is isolated behind a dedicated bridge executor.

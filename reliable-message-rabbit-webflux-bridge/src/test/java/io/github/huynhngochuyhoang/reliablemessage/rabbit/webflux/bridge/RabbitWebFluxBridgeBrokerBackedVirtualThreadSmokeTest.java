@@ -52,20 +52,18 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
-        classes = RabbitWebFluxBridgeBrokerBackedSampleSmokeTest.SampleApplication.class,
+        classes = RabbitWebFluxBridgeBrokerBackedVirtualThreadSmokeTest.SampleApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "message.reliability.transport=rabbit",
                 "message.reliability.service-name=webflux-orders",
-                "message.reliability.rabbit.exchange=s3.webflux.rabbit.events",
-                "message.reliability.rabbit.bridge.executor-mode=platform",
-                "message.reliability.rabbit.bridge.worker-threads=2",
-                "message.reliability.rabbit.bridge.queue-capacity=2",
+                "message.reliability.rabbit.exchange=s3.webflux.rabbit.virtual.events",
+                "message.reliability.rabbit.bridge.executor-mode=virtual-thread",
                 "message.reliability.rabbit.bridge.max-concurrency=4",
                 "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration,io.github.huynhngochuyhoang.reliablemessage.outbox.r2dbc.R2dbcOutboxAutoConfiguration"
         }
 )
-class RabbitWebFluxBridgeBrokerBackedSampleSmokeTest {
+class RabbitWebFluxBridgeBrokerBackedVirtualThreadSmokeTest {
 
     @Container
     static final RabbitMQContainer rabbit = new RabbitMQContainer("rabbitmq:3.13-alpine");
@@ -120,79 +118,8 @@ class RabbitWebFluxBridgeBrokerBackedSampleSmokeTest {
         assertNotNull(probe.controllerThread());
         assertTrue(probe.controllerThread().contains("http"), probe.controllerThread());
         assertTrue(rabbitTemplate.awaitSend(Duration.ofSeconds(5)));
-        assertTrue(rabbitTemplate.lastSendThread().startsWith("reliable-message-rabbit-bridge-platform-"));
+        assertTrue(rabbitTemplate.lastSendThread().startsWith("reliable-message-rabbit-bridge-virtual-"));
         assertNotEquals(probe.controllerThread(), rabbitTemplate.lastSendThread());
-    }
-
-    @Test
-    void duplicateSuccessIsAckedAndSkipsHandler() throws Exception {
-        idempotencyStore.duplicates.put("duplicate-success-key", IdempotencyState.SUCCESS);
-
-        publisher.publish(
-                "order.duplicate",
-                new OrderCreated("duplicate-success"),
-                PublishOptions.builder().idempotencyKey("duplicate-success-key").build()
-        ).block(Duration.ofSeconds(5));
-
-        assertTrue(idempotencyStore.awaitTryStart("duplicate-success-key", Duration.ofSeconds(10)));
-        assertEquals(1, idempotencyStore.tryStartCount("duplicate-success-key"));
-        assertFalse(probe.duplicates.await(Duration.ofMillis(250)));
-        assertEquals(0, probe.duplicates.invocations());
-    }
-
-    @Test
-    void duplicateProcessingIsNotAckedAsSuccessAndSkipsHandler() throws Exception {
-        idempotencyStore.duplicates.put("duplicate-processing-key", IdempotencyState.PROCESSING);
-
-        publisher.publish(
-                "order.duplicate",
-                new OrderCreated("duplicate-processing"),
-                PublishOptions.builder().idempotencyKey("duplicate-processing-key").build()
-        ).block(Duration.ofSeconds(5));
-
-        assertTrue(idempotencyStore.awaitTryStart("duplicate-processing-key", Duration.ofSeconds(10)));
-        idempotencyStore.duplicates.put("duplicate-processing-key", IdempotencyState.SUCCESS);
-        assertTrue(idempotencyStore.awaitTryStartCount("duplicate-processing-key", 2, Duration.ofSeconds(10)));
-        assertEquals(0, probe.duplicates.invocations());
-    }
-
-    @Test
-    void duplicateFailedIsNotAckedAsSuccessAndSkipsHandler() throws Exception {
-        idempotencyStore.duplicates.put("duplicate-failed-key", IdempotencyState.FAILED);
-
-        publisher.publish(
-                "order.duplicate",
-                new OrderCreated("duplicate-failed"),
-                PublishOptions.builder().idempotencyKey("duplicate-failed-key").build()
-        ).block(Duration.ofSeconds(5));
-
-        assertTrue(idempotencyStore.awaitTryStart("duplicate-failed-key", Duration.ofSeconds(10)));
-        idempotencyStore.duplicates.put("duplicate-failed-key", IdempotencyState.SUCCESS);
-        assertTrue(idempotencyStore.awaitTryStartCount("duplicate-failed-key", 2, Duration.ofSeconds(10)));
-        assertEquals(0, probe.duplicates.invocations());
-    }
-
-    @Test
-    void listenerFailureUsesBridgeFailurePathAndRabbitRedelivery() throws Exception {
-        int failuresBefore = failureHandler.failures();
-
-        publisher.publish("order.retry", new OrderCreated("retry-1"), PublishOptions.empty())
-                .block(Duration.ofSeconds(5));
-
-        assertTrue(probe.retry.await(Duration.ofSeconds(15)));
-        assertEquals(2, probe.retry.invocations());
-        assertTrue(failureHandler.awaitFailures(failuresBefore + 1, Duration.ofSeconds(5)));
-        assertEquals(failuresBefore + 1, failureHandler.failures());
-    }
-
-    @Test
-    void bridgeMetricsAreEmittedWithRuntimeTransportAndExecutorModeTags() throws Exception {
-        publisher.publish("order.metrics", new OrderCreated("metrics-1"), PublishOptions.empty())
-                .block(Duration.ofSeconds(5));
-
-        assertTrue(probe.metrics.await(Duration.ofSeconds(10)));
-        assertTrue(awaitMetric("message_rabbit_bridge_publish_total", "order.metrics", "success", 1.0, Duration.ofSeconds(5)));
-        assertTrue(awaitMetric("message_rabbit_bridge_consume_total", "order.metrics", "success", 1.0, Duration.ofSeconds(5)));
     }
 
     @Test
@@ -205,30 +132,6 @@ class RabbitWebFluxBridgeBrokerBackedSampleSmokeTest {
         assertThrows(NoSuchBeanDefinitionException.class, () -> context.getBean(AsyncRabbitTemplate.class));
     }
 
-    private boolean awaitMetric(
-            String metricName,
-            String eventName,
-            String status,
-            double expectedCount,
-            Duration timeout
-    ) throws InterruptedException {
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (metricCount(metricName, eventName, status) < expectedCount && System.nanoTime() < deadline) {
-            Thread.sleep(10);
-        }
-        return metricCount(metricName, eventName, status) >= expectedCount;
-    }
-
-    private double metricCount(String metricName, String eventName, String status) {
-        return meterRegistry.counter(
-                metricName,
-                "runtime", "webflux-bridge",
-                "transport", "rabbit",
-                "executor_mode", context.getEnvironment().getRequiredProperty("message.reliability.rabbit.bridge.executor-mode"),
-                "event_name", eventName,
-                "status", status
-        ).count();
-    }
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
