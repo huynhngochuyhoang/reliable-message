@@ -348,11 +348,13 @@ class RabbitWebFluxBridgeBrokerBackedVirtualThreadSmokeTest {
         public Mono<IdempotencyStartResult> tryStart(String key, Duration ttl) {
             return Mono.fromSupplier(() -> {
                 int count = tryStarts.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
-                firstTryStartLatches.computeIfAbsent(key, ignored -> new CountDownLatch(1)).countDown();
+                IdempotencyState duplicate = duplicates.get(key);
+                if (count == 1) {
+                    firstTryStartLatches.computeIfAbsent(key, ignored -> new CountDownLatch(1)).countDown();
+                }
                 if (count >= 2) {
                     secondTryStartLatches.computeIfAbsent(key, ignored -> new CountDownLatch(1)).countDown();
                 }
-                IdempotencyState duplicate = duplicates.get(key);
                 return duplicate == null ? IdempotencyStartResult.startAccepted() : IdempotencyStartResult.duplicate(duplicate);
             });
         }
