@@ -239,7 +239,7 @@ Out of scope:
 - Rabbit event retry queue or DLQ behavior.
 - Durable async command workflow.
 
-## S5 R2DBC Outbox
+## S5 R2DBC Outbox - Done
 
 Goal:
 - Stabilize reactive event outbox storage, schema configuration, flush scheduling, and claim behavior for WebFlux event publishers.
