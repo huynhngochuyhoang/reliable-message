@@ -180,7 +180,7 @@ Out of scope:
 - Bridge-owned retry/DLQ transport routing or topology creation.
 - Binary payload storage.
 
-## S4 Rabbit RPC WebFlux
+## S4 Rabbit RPC WebFlux - Done
 
 Goal:
 - Stabilize Rabbit request/response over `AsyncRabbitTemplate` with WebFlux-friendly `Mono` boundaries, bounded executor modes, retry, envelope errors, and RPC-specific metrics.
