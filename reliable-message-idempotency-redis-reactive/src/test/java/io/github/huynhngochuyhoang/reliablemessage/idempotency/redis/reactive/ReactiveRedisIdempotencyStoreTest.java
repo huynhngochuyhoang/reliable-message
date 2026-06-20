@@ -81,6 +81,34 @@ class ReactiveRedisIdempotencyStoreTest {
     }
 
     @Test
+    void markSuccessPreservesRemainingTtlAndWritesSuccessState() {
+        RedisMocks redis = redis();
+        when(redis.template.getExpire("test:event-1")).thenReturn(Mono.just(Duration.ofMinutes(1)));
+        when(redis.values.set("test:event-1", "SUCCESS|1779062460000|", Duration.ofMinutes(1)))
+                .thenReturn(Mono.just(true));
+        ReactiveRedisIdempotencyStore store = new ReactiveRedisIdempotencyStore(redis.template, "test:", CLOCK);
+
+        StepVerifier.create(store.markSuccess("event-1"))
+                .verifyComplete();
+
+        verify(redis.values).set("test:event-1", "SUCCESS|1779062460000|", Duration.ofMinutes(1));
+    }
+
+    @Test
+    void markFailedPreservesRemainingTtlAndWritesFailedState() {
+        RedisMocks redis = redis();
+        when(redis.template.getExpire("test:event-1")).thenReturn(Mono.just(Duration.ofMinutes(1)));
+        when(redis.values.set("test:event-1", "FAILED|1779062460000|boom pipe", Duration.ofMinutes(1)))
+                .thenReturn(Mono.just(true));
+        ReactiveRedisIdempotencyStore store = new ReactiveRedisIdempotencyStore(redis.template, "test:", CLOCK);
+
+        StepVerifier.create(store.markFailed("event-1", new IllegalStateException("boom|pipe")))
+                .verifyComplete();
+
+        verify(redis.values).set("test:event-1", "FAILED|1779062460000|boom pipe", Duration.ofMinutes(1));
+    }
+
+    @Test
     void missingKeyIsNotRecreatedWhenMarkingSuccess() {
         RedisMocks redis = redis();
         when(redis.template.getExpire("test:event-1")).thenReturn(Mono.just(Duration.ZERO));
