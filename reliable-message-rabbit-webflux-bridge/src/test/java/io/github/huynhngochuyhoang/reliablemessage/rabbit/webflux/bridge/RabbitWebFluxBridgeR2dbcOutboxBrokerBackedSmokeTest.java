@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.core.MessageStatus;
+import io.github.huynhngochuyhoang.reliablemessage.core.PublishOptions;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
 import io.github.huynhngochuyhoang.reliablemessage.outbox.r2dbc.R2dbcOutboxProperties;
@@ -46,8 +47,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -95,6 +95,9 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
     @Autowired
     OutboxListenerProbe probe;
 
+    @Autowired
+    SampleReactiveIdempotencyStore idempotencyStore;
+
     @Test
     void r2dbcOutboxFlushPublishesThroughRabbitAndListenerConsumesThenMarksPublished() throws Exception {
         String id = UUID.randomUUID().toString();
@@ -114,17 +117,67 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
                 null
         );
 
+        int invocationsBefore = probe.invocations();
+
         Integer flushed = outboxStore.initializeSchema()
                 .then(outboxStore.save(message))
                 .then(new ReactiveOutboxFlushScheduler(outboxStore, publisher, outboxProperties, Clock.systemUTC()).flushBatch())
                 .block(Duration.ofSeconds(20));
 
         assertEquals(1, flushed);
-        assertTrue(probe.await(Duration.ofSeconds(15)));
-        assertEquals(1, probe.invocations());
+        assertTrue(probe.awaitInvocations(invocationsBefore + 1, Duration.ofSeconds(15)));
+        assertEquals(invocationsBefore + 1, probe.invocations());
         assertEquals("outbox-order-1", probe.lastMessage().payload().orderId());
         assertEquals("outbox-order-1-key", probe.lastMessage().idempotencyKey());
         assertEquals("outbox-order-1-correlation", probe.lastMessage().correlationId());
+        assertEquals(MessageStatus.PUBLISHED.name(), status(id));
+    }
+
+    @Test
+    void replayAfterOutboxDeliveryIsSkippedByIdempotency() throws Exception {
+        String idempotencyKey = "outbox-order-replay-key";
+        String id = UUID.randomUUID().toString();
+        OutboxMessage message = new OutboxMessage(
+                id,
+                "order.outbox",
+                "outbox-order-replay",
+                idempotencyKey,
+                null,
+                new OrderCreated("outbox-order-replay"),
+                Map.of("x-correlation-id", "outbox-order-replay-correlation"),
+                MessageStatus.PENDING,
+                0,
+                null,
+                Instant.now(),
+                null,
+                null
+        );
+
+        int invocationsBefore = probe.invocations();
+
+        Integer flushed = outboxStore.initializeSchema()
+                .then(outboxStore.save(message))
+                .then(new ReactiveOutboxFlushScheduler(outboxStore, publisher, outboxProperties, Clock.systemUTC()).flushBatch())
+                .block(Duration.ofSeconds(20));
+
+        assertEquals(1, flushed);
+        assertTrue(probe.awaitInvocations(invocationsBefore + 1, Duration.ofSeconds(15)));
+        assertEquals(invocationsBefore + 1, probe.invocations());
+        assertTrue(idempotencyStore.awaitTryStarts(idempotencyKey, 1, Duration.ofSeconds(5)));
+        assertTrue(idempotencyStore.awaitSuccess(idempotencyKey, Duration.ofSeconds(5)));
+
+        publisher.publish(
+                "order.outbox",
+                new OrderCreated("outbox-order-replay"),
+                PublishOptions.builder()
+                        .idempotencyKey(idempotencyKey)
+                        .correlationId("outbox-order-replay-correlation")
+                        .build()
+        ).block(Duration.ofSeconds(10));
+
+        assertTrue(idempotencyStore.awaitTryStarts(idempotencyKey, 2, Duration.ofSeconds(10)));
+        assertFalse(probe.awaitInvocations(invocationsBefore + 2, Duration.ofMillis(250)));
+        assertEquals(invocationsBefore + 1, probe.invocations());
         assertEquals(MessageStatus.PUBLISHED.name(), status(id));
     }
 
@@ -155,7 +208,7 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
         }
 
         @Bean
-        ReactiveIdempotencyStore sampleReactiveIdempotencyStore() {
+        SampleReactiveIdempotencyStore sampleReactiveIdempotencyStore() {
             return new SampleReactiveIdempotencyStore();
         }
 
@@ -218,13 +271,21 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
         private final AtomicReference<ReliableMessage<OrderCreated>> lastMessage = new AtomicReference<>();
 
         void record(ReliableMessage<OrderCreated> message) {
-            invocations.incrementAndGet();
             lastMessage.set(message);
+            invocations.incrementAndGet();
             latch.countDown();
         }
 
         boolean await(Duration timeout) throws InterruptedException {
             return latch.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        boolean awaitInvocations(int expected, Duration timeout) throws InterruptedException {
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (invocations() < expected && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            return invocations() >= expected;
         }
 
         int invocations() {
@@ -238,22 +299,51 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
 
     static final class SampleReactiveIdempotencyStore implements ReactiveIdempotencyStore {
         private final ConcurrentMap<String, Boolean> successes = new ConcurrentHashMap<>();
+        private final ConcurrentMap<String, AtomicInteger> tryStarts = new ConcurrentHashMap<>();
+        private final ConcurrentMap<String, CountDownLatch> successLatches = new ConcurrentHashMap<>();
 
         @Override
         public Mono<IdempotencyStartResult> tryStart(String key, Duration ttl) {
-            return Mono.fromSupplier(() -> successes.containsKey(key)
-                    ? IdempotencyStartResult.duplicate(io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState.SUCCESS)
-                    : IdempotencyStartResult.startAccepted());
+            return Mono.fromSupplier(() -> {
+                tryStarts.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
+                return successes.containsKey(key)
+                        ? IdempotencyStartResult.duplicate(io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState.SUCCESS)
+                    : IdempotencyStartResult.startAccepted();
+            });
         }
 
         @Override
         public Mono<Void> markSuccess(String key) {
-            return Mono.fromRunnable(() -> successes.put(key, true));
+            return Mono.fromRunnable(() -> {
+                successes.put(key, true);
+                successLatches.computeIfAbsent(key, ignored -> new CountDownLatch(1)).countDown();
+            });
         }
 
         @Override
         public Mono<Void> markFailed(String key, Throwable error) {
             return Mono.empty();
+        }
+
+        boolean awaitSuccess(String key, Duration timeout) throws InterruptedException {
+            if (successes.containsKey(key)) {
+                return true;
+            }
+            return successLatches.computeIfAbsent(key, ignored -> new CountDownLatch(1))
+                    .await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        boolean awaitTryStarts(String key, int expected, Duration timeout) throws InterruptedException {
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (tryStartCount(key) < expected && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            return tryStartCount(key) >= expected;
+        }
+
+        int tryStartCount(String key) {
+            AtomicInteger count = tryStarts.get(key);
+            return count == null ? 0 : count.get();
         }
     }
 

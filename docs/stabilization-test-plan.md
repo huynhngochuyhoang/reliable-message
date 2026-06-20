@@ -300,7 +300,7 @@ Out of scope:
 - MySQL, Oracle, or SQL Server optimized claim strategies unless implemented later.
 - RPC outbox.
 
-## S6 Idempotency Retry DLQ
+## S6 Idempotency Retry DLQ And Recovery Semantics - Done
 
 Goal:
 - Stabilize duplicate detection, retry, and DLQ behavior for event messaging across MVC and WebFlux stacks without mixing in RPC semantics.
@@ -316,7 +316,7 @@ Setup:
 - Start required stores: relational database and/or Redis.
 - Start RabbitMQ and Kafka where broker-specific retry/DLQ behavior is tested.
 - Configure event listeners with idempotency providers.
-- Provision retry/DLQ or retry/DLT topology according to the transport under test.
+- Provision retry/DLQ or retry/DLT topology according to the transport under test when broker-owned routing is exercised; otherwise validate framework failure propagation boundaries.
 
 Test cases:
 - Unit: MVC idempotency store transitions new key to `PROCESSING`, then `SUCCESS` or `FAILED`.
@@ -328,6 +328,7 @@ Test cases:
 - Integration: Rabbit listener failure path nacks or invokes failure hook according to configured event behavior.
 - Integration: Kafka listener failure path does not commit offset as success.
 - Integration: retry/DLQ outcome metrics or hooks are emitted only when concrete event outcomes exist.
+- Integration: outbox-backed Rabbit bridge replay is skipped by idempotency after the first successful consume.
 
 Expected result:
 - Event handling is at-least-once with idempotency protection.
@@ -343,6 +344,7 @@ Failure cases:
 Pass criteria:
 - Store transition tests pass for supported MVC and reactive stores.
 - Broker-specific event failure tests pass.
+- End-to-end replay smoke confirms business logic runs once after outbox publish/consume and duplicate replay.
 - No RPC tests depend on event retry/DLQ behavior.
 
 Out of scope:

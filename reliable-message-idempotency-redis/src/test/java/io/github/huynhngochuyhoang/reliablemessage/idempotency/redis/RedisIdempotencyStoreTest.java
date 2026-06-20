@@ -12,16 +12,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class RedisIdempotencyStoreTest {
 
@@ -90,6 +86,32 @@ class RedisIdempotencyStoreTest {
 
         assertTrue(store.tryStart("event-1", Duration.ofMinutes(5)).started());
         assertEquals(2, executions.get());
+    }
+
+    @Test
+    void markSuccessPreservesRemainingTtlAndWritesSuccessState() {
+        StringRedisTemplate redisTemplate = org.mockito.Mockito.mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = org.mockito.Mockito.mock(ValueOperations.class);
+        when(redisTemplate.getExpire("test:event-1", TimeUnit.MILLISECONDS)).thenReturn(60_000L);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        RedisIdempotencyStore store = new RedisIdempotencyStore(redisTemplate, "test:", CLOCK);
+
+        store.markSuccess("event-1");
+
+        verify(valueOperations).set("test:event-1", "SUCCESS|1779062460000|", Duration.ofMinutes(1));
+    }
+
+    @Test
+    void markFailedPreservesRemainingTtlAndWritesFailedState() {
+        StringRedisTemplate redisTemplate = org.mockito.Mockito.mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = org.mockito.Mockito.mock(ValueOperations.class);
+        when(redisTemplate.getExpire("test:event-1", TimeUnit.MILLISECONDS)).thenReturn(60_000L);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        RedisIdempotencyStore store = new RedisIdempotencyStore(redisTemplate, "test:", CLOCK);
+
+        store.markFailed("event-1", new IllegalStateException("boom|pipe"));
+
+        verify(valueOperations).set("test:event-1", "FAILED|1779062460000|boom pipe", Duration.ofMinutes(1));
     }
 
     @Test
