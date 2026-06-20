@@ -47,8 +47,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -176,6 +175,7 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
         ).block(Duration.ofSeconds(10));
 
         assertTrue(idempotencyStore.awaitTryStarts(idempotencyKey, 2, Duration.ofSeconds(10)));
+        assertFalse(probe.awaitInvocations(invocationsBefore + 2, Duration.ofMillis(250)));
         assertEquals(invocationsBefore + 1, probe.invocations());
         assertEquals(MessageStatus.PUBLISHED.name(), status(id));
     }
