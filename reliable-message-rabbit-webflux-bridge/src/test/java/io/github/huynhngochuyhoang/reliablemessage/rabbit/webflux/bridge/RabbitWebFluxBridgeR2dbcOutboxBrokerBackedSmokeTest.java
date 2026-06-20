@@ -164,6 +164,7 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
         assertTrue(probe.awaitInvocations(invocationsBefore + 1, Duration.ofSeconds(15)));
         assertEquals(invocationsBefore + 1, probe.invocations());
         assertTrue(idempotencyStore.awaitTryStarts(idempotencyKey, 1, Duration.ofSeconds(5)));
+        assertTrue(idempotencyStore.awaitSuccess(idempotencyKey, Duration.ofSeconds(5)));
 
         publisher.publish(
                 "order.outbox",
@@ -270,8 +271,8 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
         private final AtomicReference<ReliableMessage<OrderCreated>> lastMessage = new AtomicReference<>();
 
         void record(ReliableMessage<OrderCreated> message) {
-            invocations.incrementAndGet();
             lastMessage.set(message);
+            invocations.incrementAndGet();
             latch.countDown();
         }
 
@@ -299,6 +300,7 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
     static final class SampleReactiveIdempotencyStore implements ReactiveIdempotencyStore {
         private final ConcurrentMap<String, Boolean> successes = new ConcurrentHashMap<>();
         private final ConcurrentMap<String, AtomicInteger> tryStarts = new ConcurrentHashMap<>();
+        private final ConcurrentMap<String, CountDownLatch> successLatches = new ConcurrentHashMap<>();
 
         @Override
         public Mono<IdempotencyStartResult> tryStart(String key, Duration ttl) {
@@ -312,12 +314,23 @@ class RabbitWebFluxBridgeR2dbcOutboxBrokerBackedSmokeTest {
 
         @Override
         public Mono<Void> markSuccess(String key) {
-            return Mono.fromRunnable(() -> successes.put(key, true));
+            return Mono.fromRunnable(() -> {
+                successes.put(key, true);
+                successLatches.computeIfAbsent(key, ignored -> new CountDownLatch(1)).countDown();
+            });
         }
 
         @Override
         public Mono<Void> markFailed(String key, Throwable error) {
             return Mono.empty();
+        }
+
+        boolean awaitSuccess(String key, Duration timeout) throws InterruptedException {
+            if (successes.containsKey(key)) {
+                return true;
+            }
+            return successLatches.computeIfAbsent(key, ignored -> new CountDownLatch(1))
+                    .await(timeout.toMillis(), TimeUnit.MILLISECONDS);
         }
 
         boolean awaitTryStarts(String key, int expected, Duration timeout) throws InterruptedException {
