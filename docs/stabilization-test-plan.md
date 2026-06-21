@@ -352,7 +352,7 @@ Out of scope:
 - Strategy B async Rabbit ack coordination.
 - RPC retry and circuit breaker behavior.
 
-## S7 Observability Metrics
+## S7 Observability Metrics - Done
 
 Goal:
 - Stabilize metrics and observability signals without changing business flow.
@@ -361,7 +361,7 @@ Sample app/module involved:
 - `reliable-message-observability`.
 - `reliable-message-rabbit-webflux-bridge`.
 - `reliable-message-rpc-rabbit-webflux-bridge`.
-- `reliable-message-outbox-r2dbc`.
+- `reliable-message-outbox-r2dbc` for flusher behavior boundaries; dedicated reactive outbox metrics are not implemented yet.
 - Rabbit/Kafka MVC and WebFlux event modules where metrics exist.
 
 Setup:
@@ -378,6 +378,7 @@ Test cases:
 - Unit: virtual-thread mode does not falsely expose platform queue gauges.
 - Unit: RPC request, success, failure, timeout, retry, bulkhead rejection, and duration metrics increment.
 - Unit: RPC metrics are separate from Rabbit event bridge metrics.
+- Unit: metrics use stable low-cardinality tag keys and reuse meters for repeated operations.
 - Integration: metrics preserve original error propagation.
 - Integration: ambiguous `MeterRegistry` wiring fails clearly or follows implemented fail-fast behavior.
 - Sample-app smoke: scrape or inspect registry after one publish, one consume, and one RPC call.
@@ -386,6 +387,7 @@ Expected result:
 - Metrics never convert failures into success.
 - Tags include runtime, transport, executor mode, event name or route, and status where applicable.
 - Event metrics and RPC metrics use separate names and semantics.
+- Reactive R2DBC outbox-specific meters remain out of scope until implemented; outbox publish visibility comes through the configured transport publisher metrics.
 
 Failure cases:
 - Metrics are silently disabled when ambiguous registries exist.
@@ -402,6 +404,7 @@ Out of scope:
 - Full distributed tracing.
 - New metrics backend configuration.
 - Performance benchmarking.
+- Adding new reactive R2DBC outbox-specific metrics.
 
 ## S8 MVC Kafka
 
