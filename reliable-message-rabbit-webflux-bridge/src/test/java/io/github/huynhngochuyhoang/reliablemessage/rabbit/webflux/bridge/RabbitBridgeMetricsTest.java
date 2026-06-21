@@ -3,9 +3,8 @@ package io.github.huynhngochuyhoang.reliablemessage.rabbit.webflux.bridge;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.Set;
+import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -113,6 +112,70 @@ class RabbitBridgeMetricsTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void virtualThreadModeDoesNotExposePlatformQueueGauges() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        RabbitBridgeMetrics metrics = new RabbitBridgeMetrics(meterRegistry, RabbitWebFluxBridgeProperties.ExecutorMode.VIRTUAL_THREAD);
+        ExecutorService executor = new AbstractExecutorService() {
+            private volatile boolean shutdown;
+
+
+            public void shutdown() {
+                shutdown = true;
+            }
+
+
+            public java.util.List<Runnable> shutdownNow() {
+                shutdown = true;
+                return java.util.List.of();
+            }
+
+
+            public boolean isShutdown() {
+                return shutdown;
+            }
+
+
+            public boolean isTerminated() {
+                return shutdown;
+            }
+
+
+            public boolean awaitTermination(long timeout, TimeUnit unit) {
+                return shutdown;
+            }
+
+
+            public void execute(Runnable command) {
+                command.run();
+            }
+        };
+
+        metrics.bindExecutor(executor);
+
+        assertThat(meterRegistry.find("message_rabbit_bridge_executor_active").gauge()).isNull();
+        assertThat(meterRegistry.find("message_rabbit_bridge_executor_queued").gauge()).isNull();
+    }
+
+    @Test
+    void repeatedOperationsReuseStableMetersAndAvoidHighCardinalityTags() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        RabbitBridgeMetrics metrics = new RabbitBridgeMetrics(meterRegistry, RabbitWebFluxBridgeProperties.ExecutorMode.PLATFORM);
+
+        metrics.publish("order.created", "success");
+        metrics.publish("order.created", "success");
+
+        assertThat(counter(meterRegistry, "message_rabbit_bridge_publish_total", "order.created", "success")).isEqualTo(2.0);
+        assertThat(meterRegistry.find("message_rabbit_bridge_publish_total").counters()).hasSize(1);
+        Set<String> tagKeys = meterRegistry.find("message_rabbit_bridge_publish_total").counter()
+                .getId()
+                .getTags()
+                .stream()
+                .map(tag -> tag.getKey())
+                .collect(java.util.stream.Collectors.toSet());
+        assertThat(tagKeys).doesNotContain("message_id", "correlation_id", "aggregate_id", "idempotency_key");
     }
 
     private static double counter(SimpleMeterRegistry meterRegistry, String name, String eventName, String status) {
