@@ -2,12 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.autoconfigure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.JacksonReliableMessageSerializer;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.KafkaReliableListenerRegistrar;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.KafkaReliableMessageProperties;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.KafkaReliablePublisher;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.KafkaRetryStrategy;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.KafkaTopologyAutoConfigurer;
+import io.github.huynhngochuyhoang.reliablemessage.kafka.mvc.*;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.IdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.mvc.ReliablePublisher;
 import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
@@ -20,6 +15,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.core.ConsumerFactory;
@@ -28,7 +24,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 
 import java.time.Clock;
 
-@AutoConfiguration
+@AutoConfiguration(after = KafkaAutoConfiguration.class)
 @ConditionalOnClass({KafkaTemplate.class, ConsumerFactory.class})
 @ConditionalOnProperty(prefix = "message.reliability", name = "transport", havingValue = "kafka")
 @EnableConfigurationProperties(KafkaReliableMessageProperties.class)
