@@ -406,7 +406,7 @@ Out of scope:
 - Performance benchmarking.
 - Adding new reactive R2DBC outbox-specific metrics.
 
-## S8 MVC Kafka
+## S8 MVC Kafka - Done
 
 Goal:
 - Stabilize MVC Kafka event messaging with publish, consume, partition keys, idempotency, and Kafka retry/DLT behavior where implemented.
@@ -416,7 +416,7 @@ Sample app/module involved:
 - `reliable-message-mvc-starter`.
 - `reliable-message-outbox-jdbc`.
 - `reliable-message-idempotency-jdbc` or `reliable-message-idempotency-redis`.
-- Proposed MVC Kafka sample-app smoke fixture.
+- `KafkaMvcBrokerBackedSampleSmokeTest` broker-backed sample-app fixture.
 
 Setup:
 - Start Kafka.
