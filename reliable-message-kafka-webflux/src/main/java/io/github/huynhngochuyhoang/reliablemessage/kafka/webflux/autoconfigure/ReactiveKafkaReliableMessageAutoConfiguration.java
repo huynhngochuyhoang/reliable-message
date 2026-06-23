@@ -2,13 +2,8 @@ package io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.autoconfigure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.DefaultReactiveKafkaReceiverFactory;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.JacksonReliableMessageSerializer;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.ReactiveKafkaReceiverFactory;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.ReactiveKafkaReliableListenerRegistrar;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.ReactiveKafkaReliableMessageProperties;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.ReactiveKafkaReliablePublisher;
-import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.ReactiveKafkaRetryStrategy;
+import io.github.huynhngochuyhoang.reliablemessage.kafka.webflux.*;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -90,9 +85,12 @@ public class ReactiveKafkaReliableMessageAutoConfiguration {
             KafkaSender<String, byte[]> kafkaSender,
             MessageSerializer serializer,
             ReactiveKafkaReliableMessageProperties properties,
-            Clock clock
+            Clock clock,
+            ObjectProvider<MessageObservability> observability
     ) {
-        return new ReactiveKafkaReliablePublisher(kafkaSender, serializer, properties, clock);
+        return new ReactiveKafkaReliablePublisher(
+                kafkaSender, serializer, properties, clock, observability.getIfAvailable()
+        );
     }
 
     @Bean
@@ -114,14 +112,16 @@ public class ReactiveKafkaReliableMessageAutoConfiguration {
             MessageSerializer serializer,
             ReactiveKafkaReliableMessageProperties properties,
             ObjectProvider<ReactiveKafkaRetryStrategy> retryStrategy,
-            ObjectProvider<ReactiveIdempotencyStore> idempotencyStore
+            ObjectProvider<ReactiveIdempotencyStore> idempotencyStore,
+            ObjectProvider<MessageObservability> observability
     ) {
         return new ReactiveKafkaReliableListenerRegistrar(
                 receiverFactory,
                 serializer,
                 properties,
                 retryStrategy.getIfAvailable(),
-                idempotencyStore.getIfAvailable()
+                idempotencyStore.getIfAvailable(),
+                observability.getIfAvailable()
         );
     }
 }

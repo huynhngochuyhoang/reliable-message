@@ -3,6 +3,8 @@ package io.github.huynhngochuyhoang.reliablemessage.kafka.webflux;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageTags;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyStartResult;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.IdempotencyState;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
@@ -20,6 +22,7 @@ public class ReactiveKafkaReliableMessageHandler {
     private final ReactiveIdempotencyStore idempotencyStore;
     private final Duration idempotencyTtl;
     private final ReactiveKafkaRetryStrategy retryStrategy;
+    private final MessageObservability observability;
 
     public ReactiveKafkaReliableMessageHandler(
             MessageSerializer serializer,
@@ -27,10 +30,21 @@ public class ReactiveKafkaReliableMessageHandler {
             Duration idempotencyTtl,
             ReactiveKafkaRetryStrategy retryStrategy
     ) {
+        this(serializer, idempotencyStore, idempotencyTtl, retryStrategy, null);
+    }
+
+    public ReactiveKafkaReliableMessageHandler(
+            MessageSerializer serializer,
+            ReactiveIdempotencyStore idempotencyStore,
+            Duration idempotencyTtl,
+            ReactiveKafkaRetryStrategy retryStrategy,
+            MessageObservability observability
+    ) {
         this.serializer = serializer;
         this.idempotencyStore = idempotencyStore;
         this.idempotencyTtl = idempotencyTtl == null ? Duration.ofHours(24) : idempotencyTtl;
         this.retryStrategy = retryStrategy;
+        this.observability = observability;
     }
 
     public Mono<Void> handle(ReactiveKafkaReceivedRecord record, ReactiveKafkaReliableListenerEndpoint endpoint) {
@@ -48,6 +62,7 @@ public class ReactiveKafkaReliableMessageHandler {
                     if (error instanceof DuplicateRecordInProgressException) {
                         return Mono.error(error);
                     }
+                    consumeMetric(endpoint, "failed");
                     ReliableMessage<?> message = messageRef.get();
                     Mono<Void> markFailed = idempotencyStarted.get() && message != null
                             ? idempotencyStore.markFailed(message.idempotencyKey(), error)
@@ -68,15 +83,44 @@ public class ReactiveKafkaReliableMessageHandler {
         return tryStart(message)
                 .flatMap(startResult -> {
                     if (!startResult.started()) {
-                        return startResult.state() == IdempotencyState.SUCCESS
-                                ? record.receiverOffset().commit()
-                                : Mono.error(new DuplicateRecordInProgressException(message.idempotencyKey(), startResult.state()));
+                        duplicateMetric(endpoint);
+                        if (startResult.state() == IdempotencyState.SUCCESS) {
+                            consumeMetric(endpoint, "duplicate");
+                            return record.receiverOffset().commit();
+                        }
+                        return Mono.error(new DuplicateRecordInProgressException(message.idempotencyKey(), startResult.state()));
                     }
                     idempotencyStarted.set(isIdempotencyEnabled(message));
                     return invoker.invoke(message)
                             .then(markSuccess(message))
-                            .then(record.receiverOffset().commit());
+                            .then(record.receiverOffset().commit())
+                            .doOnSuccess(ignored -> consumeMetric(endpoint, "success"));
                 });
+    }
+
+    private void duplicateMetric(ReactiveKafkaReliableListenerEndpoint endpoint) {
+        increment("message_duplicate_total", endpoint, "duplicate");
+    }
+
+    private void consumeMetric(ReactiveKafkaReliableListenerEndpoint endpoint, String status) {
+        increment("message_consume_total", endpoint, status);
+        if ("failed".equals(status)) {
+            increment("message_consume_failed_total", endpoint, status);
+        }
+    }
+
+    private void increment(String metricName, ReactiveKafkaReliableListenerEndpoint endpoint, String status) {
+        if (observability == null) {
+            return;
+        }
+        try {
+            observability.increment(
+                    metricName,
+                    MessageTags.webfluxKafka(endpoint.eventName(), endpoint.consumerGroup(), status)
+            );
+        } catch (RuntimeException ignored) {
+            // Metrics must not change Kafka event flow.
+        }
     }
 
     private static final class DuplicateRecordInProgressException extends RuntimeException {
