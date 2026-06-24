@@ -18,6 +18,10 @@ public record MessageTags(
         return new MessageTags("mvc", "kafka", eventName, consumer, status);
     }
 
+    public static MessageTags webfluxKafka(String eventName, String consumer, String status) {
+        return new MessageTags("webflux", "kafka", eventName, consumer, status);
+    }
+
     public Tags toMicrometerTags() {
         Tags tags = Tags.of(
                 "runtime", value(runtime),

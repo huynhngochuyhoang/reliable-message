@@ -457,7 +457,7 @@ Out of scope:
 - Rabbit retry/DLQ.
 - New Kafka retry topology redesign.
 
-## S9 WebFlux Kafka
+## S9 WebFlux Kafka - Done
 
 Goal:
 - Stabilize reactive Kafka event messaging with `ReactiveReliablePublisher`, reactive listener flow, R2DBC outbox, idempotency, and bounded processing.
@@ -467,7 +467,7 @@ Sample app/module involved:
 - `reliable-message-webflux-starter`.
 - `reliable-message-outbox-r2dbc`.
 - `reliable-message-idempotency-r2dbc` or `reliable-message-idempotency-redis-reactive`.
-- Proposed WebFlux Kafka sample-app smoke fixture.
+- `KafkaWebFluxBrokerBackedSampleSmokeTest` broker-backed sample-app fixture.
 
 Setup:
 - Start Kafka.

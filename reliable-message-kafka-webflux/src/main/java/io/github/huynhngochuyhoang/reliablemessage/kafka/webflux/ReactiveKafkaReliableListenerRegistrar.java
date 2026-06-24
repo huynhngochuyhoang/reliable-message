@@ -2,6 +2,7 @@ package io.github.huynhngochuyhoang.reliablemessage.kafka.webflux;
 
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveIdempotencyStore;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliableListener;
 import org.springframework.aop.support.AopUtils;
@@ -27,6 +28,7 @@ public class ReactiveKafkaReliableListenerRegistrar implements SmartInitializing
     private final ReactiveKafkaReliableMessageProperties properties;
     private final ReactiveKafkaRetryStrategy retryStrategy;
     private final ReactiveIdempotencyStore idempotencyStore;
+    private final MessageObservability observability;
     private final List<ReactiveKafkaReliableListenerContainer> containers = new ArrayList<>();
     private ApplicationContext applicationContext;
 
@@ -37,11 +39,23 @@ public class ReactiveKafkaReliableListenerRegistrar implements SmartInitializing
             ReactiveKafkaRetryStrategy retryStrategy,
             ReactiveIdempotencyStore idempotencyStore
     ) {
+        this(receiverFactory, serializer, properties, retryStrategy, idempotencyStore, null);
+    }
+
+    public ReactiveKafkaReliableListenerRegistrar(
+            ReactiveKafkaReceiverFactory receiverFactory,
+            MessageSerializer serializer,
+            ReactiveKafkaReliableMessageProperties properties,
+            ReactiveKafkaRetryStrategy retryStrategy,
+            ReactiveIdempotencyStore idempotencyStore,
+            MessageObservability observability
+    ) {
         this.receiverFactory = receiverFactory;
         this.serializer = serializer;
         this.properties = properties;
         this.retryStrategy = retryStrategy;
         this.idempotencyStore = idempotencyStore;
+        this.observability = observability;
     }
 
     @Override
@@ -107,7 +121,8 @@ public class ReactiveKafkaReliableListenerRegistrar implements SmartInitializing
                 serializer,
                 idempotencyStore,
                 properties.getIdempotency().getTtl(),
-                retryStrategy
+                retryStrategy,
+                observability
         );
         return new ReactiveKafkaReliableListenerContainer(
                 receiverFactory.create(listenerTopics(endpoint), endpoint.consumerGroup()),

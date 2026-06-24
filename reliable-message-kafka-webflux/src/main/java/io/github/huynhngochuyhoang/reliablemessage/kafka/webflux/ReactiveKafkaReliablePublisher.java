@@ -4,10 +4,13 @@ import io.github.huynhngochuyhoang.reliablemessage.core.PublishOptions;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessage;
 import io.github.huynhngochuyhoang.reliablemessage.core.ReliableMessageHeaders;
 import io.github.huynhngochuyhoang.reliablemessage.core.serialization.MessageSerializer;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageObservability;
+import io.github.huynhngochuyhoang.reliablemessage.observability.MessageTags;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePublisher;
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReliableMessageReactorContext;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 import reactor.kafka.sender.SenderResult;
@@ -23,6 +26,7 @@ public class ReactiveKafkaReliablePublisher implements ReactiveReliablePublisher
     private final MessageSerializer serializer;
     private final ReactiveKafkaReliableMessageProperties properties;
     private final Clock clock;
+    private final MessageObservability observability;
 
     public ReactiveKafkaReliablePublisher(
             KafkaSender<String, byte[]> kafkaSender,
@@ -30,10 +34,21 @@ public class ReactiveKafkaReliablePublisher implements ReactiveReliablePublisher
             ReactiveKafkaReliableMessageProperties properties,
             Clock clock
     ) {
+        this(kafkaSender, serializer, properties, clock, null);
+    }
+
+    public ReactiveKafkaReliablePublisher(
+            KafkaSender<String, byte[]> kafkaSender,
+            MessageSerializer serializer,
+            ReactiveKafkaReliableMessageProperties properties,
+            Clock clock,
+            MessageObservability observability
+    ) {
         this.kafkaSender = kafkaSender;
         this.serializer = serializer;
         this.properties = properties;
         this.clock = clock;
+        this.observability = observability;
     }
 
     @Override
@@ -53,7 +68,33 @@ public class ReactiveKafkaReliablePublisher implements ReactiveReliablePublisher
             return kafkaSender.send(Mono.just(SenderRecord.create(record, reliableMessage.messageId())))
                     .next()
                     .flatMap(this::toCompletion);
-        });
+        })
+                .doOnSuccess(ignored -> publishMetric(eventName, "success"))
+                .doOnError(error -> {
+                    publishMetric(eventName, "failed");
+                    increment("message_publish_failed_total", eventName, "failed");
+                })
+                .doFinally(signal -> {
+                    if (signal == SignalType.CANCEL) {
+                        publishMetric(eventName, "failed");
+                        increment("message_publish_failed_total", eventName, "failed");
+                    }
+                });
+    }
+
+    private void publishMetric(String eventName, String status) {
+        increment("message_publish_total", eventName, status);
+    }
+
+    private void increment(String metricName, String eventName, String status) {
+        if (observability == null) {
+            return;
+        }
+        try {
+            observability.increment(metricName, MessageTags.webfluxKafka(eventName, null, status));
+        } catch (RuntimeException ignored) {
+            // Metrics must not change Kafka event flow.
+        }
     }
 
     private Mono<Void> toCompletion(SenderResult<String> result) {
