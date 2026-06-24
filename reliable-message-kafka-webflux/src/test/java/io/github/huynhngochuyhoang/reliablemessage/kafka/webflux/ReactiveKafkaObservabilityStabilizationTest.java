@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -59,6 +60,28 @@ class ReactiveKafkaObservabilityStabilizationTest {
                 .counter().count());
         assertEquals(1.0, registry.get("message_publish_failed_total")
                 .tags("runtime", "webflux", "transport", "kafka", "event_name", "order.failed", "status", "failed")
+                .counter().count());
+    }
+
+    @Test
+    void recordsTimedOutPublishAsFailureWhenDownstreamCancelsKafkaSend() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        @SuppressWarnings("unchecked")
+        KafkaSender<String, byte[]> hangingSender = org.mockito.Mockito.mock(KafkaSender.class);
+        when(hangingSender.send(any(org.reactivestreams.Publisher.class))).thenReturn(Flux.never());
+
+        StepVerifier.withVirtualTime(() -> publisher(hangingSender, registry)
+                        .publish("order.timeout", new OrderCreated("order-1"), PublishOptions.empty())
+                        .timeout(Duration.ofSeconds(1)))
+                .thenAwait(Duration.ofSeconds(1))
+                .expectError(TimeoutException.class)
+                .verify();
+
+        assertEquals(1.0, registry.get("message_publish_total")
+                .tags("runtime", "webflux", "transport", "kafka", "event_name", "order.timeout", "status", "failed")
+                .counter().count());
+        assertEquals(1.0, registry.get("message_publish_failed_total")
+                .tags("runtime", "webflux", "transport", "kafka", "event_name", "order.timeout", "status", "failed")
                 .counter().count());
     }
 

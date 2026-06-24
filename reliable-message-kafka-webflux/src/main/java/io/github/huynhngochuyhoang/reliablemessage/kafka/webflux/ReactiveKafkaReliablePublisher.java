@@ -10,6 +10,7 @@ import io.github.huynhngochuyhoang.reliablemessage.webflux.ReactiveReliablePubli
 import io.github.huynhngochuyhoang.reliablemessage.webflux.ReliableMessageReactorContext;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 import reactor.kafka.sender.SenderResult;
@@ -72,6 +73,12 @@ public class ReactiveKafkaReliablePublisher implements ReactiveReliablePublisher
                 .doOnError(error -> {
                     publishMetric(eventName, "failed");
                     increment("message_publish_failed_total", eventName, "failed");
+                })
+                .doFinally(signal -> {
+                    if (signal == SignalType.CANCEL) {
+                        publishMetric(eventName, "failed");
+                        increment("message_publish_failed_total", eventName, "failed");
+                    }
                 });
     }
 
