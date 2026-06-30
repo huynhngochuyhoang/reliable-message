@@ -21,6 +21,7 @@ For architecture diagrams and usage, start here:
 - [Usage guide](docs/usage-guide.md)
 - [Rabbit WebFlux blocking bridge](docs/rabbit-webflux-bridge-usage.md)
 - [Rabbit RPC WebFlux example](docs/examples/rabbit-rpc-webflux.md)
+- [Changelog](docs/changelog.md)
 
 ## Choose A Stack
 
@@ -150,6 +151,7 @@ Operations and extensions:
 - [WebFlux Kafka](docs/webflux-kafka-milestone-10.md)
 - [RPC extension](docs/rpc-extension-milestone-12.md)
 - [Audit extension](docs/audit-extension-milestone-13.md)
+- [Changelog](docs/changelog.md)
 - [Roadmap plans](plans/README.md)
 
 ## Requirements

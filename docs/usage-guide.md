@@ -629,7 +629,7 @@ Avoid these patterns:
 
 For production readiness, verify:
 
-- Outbox backlog is visible when the outbox module and flush scheduler are configured.
+- JDBC outbox backlog is visible through outbox metrics when the JDBC outbox scheduler is configured. Reactive R2DBC outbox-specific backlog meters are not implemented yet; R2DBC outbox publish visibility comes through the active transport publisher metrics.
 - Duplicate outcomes are visible.
 - Retry and DLQ/DLT outcomes are visible for event messaging.
 - Bridge executor rejected metrics are visible for Rabbit WebFlux bridge. Active and queued gauges are platform-mode only.

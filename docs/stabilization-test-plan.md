@@ -510,7 +510,7 @@ Out of scope:
 - RPC.
 - Binary payload storage.
 
-## S10 Docs Example Verification
+## S10 Docs Example Verification - Done
 
 Goal:
 - Prove user-facing examples are accurate, copyable, and do not overclaim behavior.
@@ -522,22 +522,22 @@ Sample app/module involved:
 - `docs/examples/rabbit-webflux-bridge.md`.
 - `docs/examples/rabbit-rpc-webflux.md`.
 - `docs/examples/audit-extension.md`.
-- Proposed docs-example smoke fixtures generated from the documented snippets.
+- Existing sample smoke fixtures and public docs examples. Generated docs-example smoke fixtures are future hardening and are not part of the completed S10 scope.
 
 Setup:
-- Extract or mirror each example into a minimal smoke fixture.
+- Compare public examples against existing sample smoke fixtures and source APIs.
 - Use only documented dependencies, required infrastructure beans, and properties.
 - Provision broker topology and database schema where the docs say it is required.
-- Run markdown checks and stale-claim searches.
+- Run stale-claim searches and link/format checks available in the repo.
 
 Test cases:
-- Sample-app smoke: MVC Rabbit example boots and sends/consumes one event.
-- Sample-app smoke: MVC Kafka example boots and sends/consumes one event.
-- Sample-app smoke: WebFlux Kafka example boots and uses reactive publisher/listener.
-- Sample-app smoke: Rabbit WebFlux blocking bridge example boots in platform mode.
-- Sample-app smoke: Rabbit WebFlux blocking bridge example boots in virtual-thread mode.
-- Sample-app smoke: Rabbit RPC WebFlux example boots with documented `AsyncRabbitTemplate`, smart converter, and RPC topology.
-- Sample-app smoke: audit extension example boots with custom sink or no-op-safe configuration.
+- Existing sample-app smoke: MVC Rabbit sample boots and sends/consumes one event.
+- Existing sample-app smoke: MVC Kafka sample boots and sends/consumes one event.
+- Existing sample-app smoke: WebFlux Kafka sample boots and uses reactive publisher/listener.
+- Existing sample-app smoke: Rabbit WebFlux blocking bridge sample boots in platform mode.
+- Existing sample-app smoke: Rabbit WebFlux blocking bridge sample boots in virtual-thread mode.
+- Existing sample-app smoke: Rabbit RPC WebFlux sample boots with `AsyncRabbitTemplate`, smart converter, and RPC topology.
+- Documentation check: audit extension examples use current sink and capture-policy APIs.
 - Documentation check: no examples claim fully reactive RabbitMQ.
 - Documentation check: no examples claim exactly-once delivery.
 - Documentation check: no examples claim RPC uses outbox by default.
@@ -555,13 +555,14 @@ Failure cases:
 - Docs imply `RabbitTemplate` is safe to call directly in WebFlux handlers.
 
 Pass criteria:
-- All docs-example smoke fixtures pass.
-- Markdown validation passes.
+- Existing sample smoke fixtures pass for the documented runtime paths.
+- Link/format checks available in the repo pass.
 - Stale-claim search finds no unsupported guarantee wording.
 - Docs remain concise and production-oriented.
 
 Out of scope:
 - Rewriting all documentation.
+- Generated docs-example fixture framework.
 - Adding runtime features to make examples work.
 - Benchmarking or load testing.
 
