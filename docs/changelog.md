@@ -16,5 +16,5 @@ Current limitations:
 - Rabbit WebFlux event bridge is not fully reactive RabbitMQ and does not provide non-blocking RabbitMQ broker I/O.
 - Strategy B async Rabbit ack coordination is not implemented.
 - Binary R2DBC outbox payload storage is planned and fails fast today.
-- MySQL, Oracle, and SQL Server optimized R2DBC outbox claim strategies are not implemented.
+- MySQL optimized R2DBC outbox claim strategy is not implemented. Oracle and SQL Server R2DBC outbox flushing are unsupported until dialect-specific claim strategies replace the current LIMIT-based fallback.
 - Rabbit RPC circuit-breaker integration is not implemented.
